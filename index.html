@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monarch Multi-Agent Architecture Workbench</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+  <div id="app-container">
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <div class="brand-icon">M</div>
+        <div class="brand-title">Monarch Platform</div>
+      </div>
+      
+      <div class="system-status">
+        <span id="model-tag" class="model-tag">Groq Active</span>
+        <span id="langsmith-tag" class="model-tag" style="color: #34d399;">LangSmith: MY</span>
+        <div class="status-pill">
+          <div class="status-dot"></div>
+          <span>System Healthy</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Layout -->
+    <div class="main-layout">
+      <!-- Sidebar Controls -->
+      <aside>
+        <!-- Session Config -->
+        <div class="panel-section">
+          <div class="section-title">👤 User & Session</div>
+          <div class="input-group">
+            <label for="user-id-input">User ID Scope</label>
+            <input type="text" id="user-id-input" class="input-control" value="user_123" placeholder="Enter user_id...">
+          </div>
+          <div class="toggle-group">
+            <span>Run DeepEval Metrics</span>
+            <label class="switch">
+              <input type="checkbox" id="eval-toggle">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- RAG Document Ingestion -->
+        <div class="panel-section">
+          <div class="section-title">📄 Multimodal RAG Ingestion</div>
+          <div class="upload-dropzone" id="upload-dropzone">
+            <div class="dropzone-icon">📥</div>
+            <div class="dropzone-text">Click or drop PDF, DOCX, TXT, or Image file here to index into RAG vector store</div>
+            <input type="file" id="file-input" style="display: none;" accept=".pdf,.docx,.doc,.txt,.md,.png,.jpg,.jpeg">
+          </div>
+        </div>
+
+        <!-- Long-Term User Memories -->
+        <div class="panel-section" style="flex: 1; display: flex; flex-direction: column;">
+          <div class="section-title">🧠 Long-Term Distilled Memories</div>
+          <div id="memories-list" class="memories-list" style="flex: 1;">
+            <div class="memory-item">Loading memories...</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Main Chat Area -->
+      <main>
+        <div class="messages-container" id="messages-container">
+          <div class="message-bubble assistant">
+            <div class="avatar">M</div>
+            <div class="content-box">
+              <span class="route-badge planner">Route: System</span>
+              <div class="message-text">Welcome to Monarch Workbench! Support added for <b>Text</b>, <b>PDF</b>, <b>DOCX</b>, and <b>Images</b> (Vision & RAG).</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Input Bar -->
+        <div class="chat-input-area">
+          <div id="image-preview-container" style="display: none; padding: 6px 12px; font-size: 0.82rem; background: rgba(59, 130, 246, 0.1); border-radius: 6px; margin-bottom: 8px; align-items: center; justify-content: space-between;">
+            <span>📷 Attached Image: <strong id="attached-image-name"></strong></span>
+            <button id="remove-image-btn" style="background: none; border: none; color: #ef4444; cursor: pointer; font-weight: bold;">✕ Remove</button>
+          </div>
+          <form class="chat-form" id="chat-form">
+            <button type="button" id="attach-image-btn" title="Attach Image for Vision analysis" style="background: #374151; color: #e5e7eb; border: 1px solid #4b5563; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-size: 1rem; margin-right: 6px;">📷</button>
+            <input type="file" id="chat-image-input" style="display: none;" accept=".png,.jpg,.jpeg">
+            <input type="text" id="chat-input" class="chat-input" placeholder="Type a message or attach an image..." autocomplete="off">
+            <button type="submit" class="send-btn">Send Prompt</button>
+          </form>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
