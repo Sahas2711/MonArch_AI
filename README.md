@@ -4,6 +4,7 @@
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-blue.svg)](https://langchain-ai.github.io/langgraph/)
 [![Groq Vision](https://img.shields.io/badge/Groq-Vision_llama--3.2-orange.svg)](https://groq.com/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://www.docker.com/)
+[![AWS Deployment](https://img.shields.io/badge/AWS-Cloud_Deployed-ff9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **Monarch** is an enterprise-level multi-agent orchestration platform built with **LangGraph**, **Groq Vision**, **FastAPI**, **Hybrid RAG (FAISS + BM25)**, **FastMCP**, **Enterprise Guardrails**, **Reflection Loop Engineering**, and **Automated Evaluation Harnesses**.
@@ -207,7 +208,7 @@ python main.py --serve-api
 
 ---
 
-### 2. 🐳 Docker & Docker Compose Deployment (Recommended)
+### 2. 🐳 Docker & Docker Compose Deployment
 
 Monarch is fully containerized with built-in support for OCR and PDF rendering libraries.
 
@@ -227,7 +228,17 @@ docker run -d -p 8000:8000 --env-file .env --name monarch monarch-app
 
 ---
 
-### 3. 🧪 Run Automated Evaluation Test Harness
+### 3. ☁️ AWS Cloud Infrastructure Deployment
+
+Monarch is configured and deployed on **Amazon Web Services (AWS)** using containerized Docker execution.
+
+* **Production Architecture**: Deployed as a containerized cloud service on AWS with automated health monitoring via `/api/health`.
+* **Security & Environment Isolation**: All API credentials (`GROQ_API_KEY`, etc.) are secured in AWS environment configuration stores.
+* **Multimodal API Endpoint**: Exposes production REST endpoints for multi-agent reasoning, RAG ingestion, memory distillation, and vision processing.
+
+---
+
+### 4. 🧪 Run Automated Evaluation Test Harness
 
 Execute the automated regression benchmark suite:
 
@@ -237,7 +248,7 @@ python main.py --run-harness
 
 ---
 
-### 4. 📄 Ingest Documents into RAG Store via CLI
+### 5. 📄 Ingest Documents into RAG Store via CLI
 
 ```bash
 python main.py --ingest ./path/to/document.pdf --user-id user_123
@@ -245,7 +256,7 @@ python main.py --ingest ./path/to/document.pdf --user-id user_123
 
 ---
 
-### 5. 🌐 Launch FastMCP Tool Server
+### 6. 🌐 Launch FastMCP Tool Server
 
 Expose Monarch tools over Model Context Protocol (Streamable HTTP):
 
