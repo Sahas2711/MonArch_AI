@@ -5,6 +5,21 @@ from utils.logger import log
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///monarch.db")
 
+_pg_pool = None
+
+
+async def get_pg_pool():
+    """Lazy initialize and return an asyncpg connection pool for Aurora/PostgreSQL."""
+    global _pg_pool
+    if _pg_pool is None and DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        try:
+            import asyncpg
+            _pg_pool = await asyncpg.create_pool(dsn=DATABASE_URL, min_size=1, max_size=10)
+            log.info("Initialized Aurora PostgreSQL connection pool.")
+        except Exception as exc:
+            log.error("Failed to initialize PostgreSQL pool (%s). Falling back to SQLite.", exc)
+    return _pg_pool
+
 
 def get_sqlite_connection(db_path: str = "monarch.db") -> sqlite3.Connection:
     """Provide a SQLite connection for local development / testing."""

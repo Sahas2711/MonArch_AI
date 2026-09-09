@@ -2,6 +2,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from Agents.planner import planner
+from Agents.parallel import parallel_agent
 from Agents.rag import rag_agent
 from Agents.reflection import reflection_node
 from Agents.research import research_agent
@@ -25,6 +26,7 @@ def build_graph():
     builder.add_node("research_agent", research_agent)
     builder.add_node("rag_agent", rag_agent)
     builder.add_node("vision_agent", vision_agent)
+    builder.add_node("parallel_agent", parallel_agent)
     builder.add_node("reflection", reflection_node)
 
     builder.add_edge(START, "orchestrator")
@@ -36,6 +38,7 @@ def build_graph():
             "research_agent": "research_agent",
             "rag_agent": "rag_agent",
             "vision_agent": "vision_agent",
+            "parallel_agent": "parallel_agent",
         },
     )
 
@@ -44,6 +47,7 @@ def build_graph():
     builder.add_edge("research_agent", "reflection")
     builder.add_edge("rag_agent", "reflection")
     builder.add_edge("vision_agent", "reflection")
+    builder.add_edge("parallel_agent", "reflection")
 
     # Reflection node conditionally retries target worker node or completes
     builder.add_conditional_edges(
@@ -54,6 +58,7 @@ def build_graph():
             "research_agent": "research_agent",
             "rag_agent": "rag_agent",
             "vision_agent": "vision_agent",
+            "parallel_agent": "parallel_agent",
             END: END,
         },
     )

@@ -4,12 +4,54 @@ from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from utils.logger import log
 
+import time
+from dotenv import load_dotenv
+from langchain_groq import ChatGroq
+from utils.logger import log
+
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+_secrets_cache = {}
+_cache_ttl_seconds = 300
+
+
+def get_secret(secret_name: str, fallback_env_var: str) -> str:
+    """
+    Fetch secret from AWS Secrets Manager with 5-minute TTL cache,
+    falling back to local environment variable if AWS is not configured.
+    """
+    now = time.time()
+    if secret_name in _secrets_cache:
+        val, fetched_at = _secrets_cache[secret_name]
+        if now - fetched_at < _cache_ttl_seconds:
+            return val
+
+    secret_arn = os.getenv("AWS_SECRET_ARN") or os.getenv("SECRETS_MANAGER_SECRET_ID")
+    if secret_arn:
+        try:
+            import json
+            import boto3
+
+            client = boto3.client("secretsmanager", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            res = client.get_secret_value(SecretId=secret_arn)
+            if "SecretString" in res:
+                secrets_dict = json.loads(res["SecretString"])
+                if secret_name in secrets_dict:
+                    val = secrets_dict[secret_name]
+                    _secrets_cache[secret_name] = (val, now)
+                    return val
+        except Exception as exc:
+            log.warning("Secrets Manager fetch failed for %s (%s). Using env fallback.", secret_name, exc)
+
+    val = os.getenv(fallback_env_var, "")
+    _secrets_cache[secret_name] = (val, now)
+    return val
+
+
+GROQ_API_KEY = get_secret("GROQ_API_KEY", "GROQ_API_KEY")
 RAW_GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY")
+UNSTRUCTURED_API_KEY = get_secret("UNSTRUCTURED_API_KEY", "UNSTRUCTURED_API_KEY")
 
 # LangSmith Observability setup
 LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")

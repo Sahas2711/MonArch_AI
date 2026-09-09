@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -218,17 +218,83 @@ async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
         )
 
 
+@app.post("/api/chat/stream", tags=["Chat"])
+async def chat_stream_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
+    """
+    Server-Sent Events (SSE) token-level streaming endpoint for real-time response generation.
+    """
+    import json
+    chat_id = req.chat_id or str(uuid.uuid4())
+    config = {"configurable": {"thread_id": chat_id}}
+
+    memory_repo.save_message(chat_id=chat_id, role="user", content=req.user_inp)
+
+    async def event_generator():
+        full_output = ""
+        route_taken = "planner"
+
+        input_state = {
+            "user_inp": req.user_inp,
+            "messages": [HumanMessage(content=req.user_inp)],
+            "user_id": req.user_id,
+            "image_data": req.image_data,
+            "output": "",
+            "context": "",
+            "route": "",
+        }
+
+        try:
+            async for event in graph.astream_events(input_state, config=config, version="v2"):
+                kind = event.get("event")
+                if kind == "on_chain_end" and event.get("name") == "orchestrator":
+                    output_data = event.get("data", {}).get("output", {})
+                    if isinstance(output_data, dict):
+                        route_taken = output_data.get("route", "planner")
+                        yield f"data: {json.dumps({'event': 'route', 'route': route_taken, 'chat_id': chat_id})}\n\n"
+
+                elif kind == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    if chunk and hasattr(chunk, "content") and chunk.content:
+                        token = chunk.content
+                        full_output += token
+                        yield f"data: {json.dumps({'event': 'token', 'token': token})}\n\n"
+
+            # Save completed response to DB
+            memory_repo.save_message(chat_id=chat_id, role="assistant", content=full_output)
+
+            if req.user_id:
+                background_tasks.add_task(
+                    distill_and_store_facts,
+                    user_id=req.user_id,
+                    messages=[
+                        {"role": "user", "content": req.user_inp},
+                        {"role": "assistant", "content": full_output},
+                    ],
+                    chat_id=chat_id,
+                )
+
+            yield f"data: {json.dumps({'event': 'done', 'output': full_output, 'route': route_taken, 'chat_id': chat_id})}\n\n"
+        except Exception as exc:
+            log.error("Streaming chat endpoint error: %s", exc, exc_info=True)
+            yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
 @app.post("/api/ingest", response_model=IngestResponse, tags=["RAG"])
 async def ingest_file(file: UploadFile = File(...), user_id: Optional[str] = None):
     """
-    Multipart file upload endpoint. Saves file temporarily, chunks & embeds content into RAG vector store.
+    Multipart file upload endpoint. Uploads document to Amazon S3, chunks & embeds content into RAG vector store.
     """
+    from storage.s3_manager import s3_manager
+
     suffix = os.path.splitext(file.filename)[1]
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = tmp.name
 
     try:
+        s3_res = s3_manager.upload_document(tmp_path, file.filename, user_id=user_id)
         res = rag_manager.ingest(tmp_path, user_id=user_id)
         return IngestResponse(
             status="success",
@@ -246,6 +312,29 @@ async def ingest_file(file: UploadFile = File(...), user_id: Optional[str] = Non
             os.remove(tmp_path)
 
 
+@app.get("/api/documents/{user_id}", tags=["RAG"])
+async def list_user_documents(user_id: str):
+    """List ingested documents and chunks metadata associated with a user."""
+    user_docs = [
+        {"source": d.metadata.get("source"), "chunk_index": d.metadata.get("chunk_index")}
+        for d in rag_manager.all_documents
+        if d.metadata.get("user_id") == user_id
+    ]
+    return {"user_id": user_id, "document_count": len(user_docs), "documents": user_docs}
+
+
+@app.delete("/api/documents/{user_id}", tags=["RAG"])
+async def delete_user_documents(user_id: str):
+    """Delete all document chunks for a specific user from RAG store."""
+    before_count = len(rag_manager.all_documents)
+    rag_manager.all_documents = [
+        d for d in rag_manager.all_documents if d.metadata.get("user_id") != user_id
+    ]
+    rag_manager._bm25_dirty = True
+    removed = before_count - len(rag_manager.all_documents)
+    return {"status": "success", "removed_chunks": removed, "user_id": user_id}
+
+
 @app.get("/api/memories/{user_id}", response_model=List[str], tags=["Memory"])
 async def get_user_memories(user_id: str):
     """Fetch active long-term memories for a user."""
@@ -258,6 +347,34 @@ async def add_user_memory(req: MemoryRequest):
     """Manually insert a long-term user memory fact."""
     mem_id = memory_repo.add_memory(user_id=req.user_id, content=req.content)
     return {"status": "success", "memory_id": mem_id}
+
+
+@app.delete("/api/user/{user_id}/data", tags=["Security & Compliance"])
+async def delete_user_data_endpoint(user_id: str):
+    """
+    GDPR Compliance Data Erasure Endpoint.
+    Purges all stored database chat messages, memories, and RAG document chunks for user_id.
+    """
+    from audit.data_retention import purge_user_data
+    from audit.logger import log_audit_event
+
+    res = purge_user_data(user_id)
+    log_audit_event(user_id=user_id, action="GDPR_DATA_ERASURE", route="/api/user/{user_id}/data", status="success")
+    return res
+
+
+@app.get("/api/admin/users", tags=["Admin"])
+async def admin_list_users():
+    """Admin endpoint to inspect user accounts and active memory counts."""
+    from SQL.db import get_sqlite_connection
+
+    conn = get_sqlite_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT DISTINCT user_id FROM user_memories UNION SELECT DISTINCT user_id FROM chats")
+    rows = cursor.fetchall()
+    conn.close()
+    users = [r[0] for r in rows if r[0]]
+    return {"status": "success", "total_users": len(users), "users": users}
 
 
 if __name__ == "__main__":
