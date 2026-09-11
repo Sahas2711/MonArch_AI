@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vasooli / Wemboo — AI Payment Compliance & Legal Notice Engine for 63M Indian MSMEs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #030712;
+      --card-bg: rgba(17, 24, 39, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --primary-glow: rgba(99, 102, 241, 0.35);
+      --accent: #f59e0b;
+      --danger: #ef4444;
+      --success: #10b981;
+      --font: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* Ambient Background Glow */
+    .glow-bg {
+      position: fixed;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(245, 158, 11, 0.05) 50%, transparent 80%);
+      filter: blur(80px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Navbar */
+    .navbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1.25rem 2.5rem;
+      max-width: 1280px;
+      margin: 0 auto;
+      position: relative;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 800;
+      font-size: 1.35rem;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-logo {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: white;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+    }
+
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-weight: 500;
+      font-size: 0.92rem;
+      transition: color 0.2s;
+    }
+
+    .nav-link:hover { color: var(--text); }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.35rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.92rem;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #4338ca);
+      color: white;
+      box-shadow: 0 0 25px var(--primary-glow);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 0 35px rgba(99, 102, 241, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text);
+      border: 1px solid var(--card-border);
+    }
+
+    .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); }
+
+    .btn-accent {
+      background: linear-gradient(135deg, var(--accent), #d97706);
+      color: white;
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+    }
+
+    /* Hero Section */
+    .hero {
+      max-width: 1100px;
+      margin: 4rem auto 3rem auto;
+      text-align: center;
+      padding: 0 1.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .pill-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 0.9rem;
+      border-radius: 9999px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: #a5b4fc;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-title {
+      font-size: 3.5rem;
+      font-weight: 800;
+      letter-spacing: -1.5px;
+      line-height: 1.15;
+      margin-bottom: 1.5rem;
+    }
+
+    .hero-gradient {
+      background: linear-gradient(135deg, #ffffff 40%, #a5b4fc 70%, #f59e0b 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-desc {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 760px;
+      margin: 0 auto 2.5rem auto;
+    }
+
+    .hero-cta-group {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 1.25rem;
+      margin-bottom: 3rem;
+    }
+
+    /* Stats Banner */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1.5rem;
+      max-width: 1100px;
+      margin: 2rem auto 5rem auto;
+      padding: 1.75rem 2rem;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    }
+
+    .stat-item { text-align: left; }
+    .stat-number {
+      font-size: 2rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.5px;
+    }
+    .stat-label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Interactive Audit Demo Card */
+    .demo-section {
+      max-width: 1000px;
+      margin: 0 auto 6rem auto;
+      padding: 0 1.5rem;
+      position: relative;
+    }
+
+    .demo-card {
+      background: rgba(17, 24, 39, 0.9);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 25px 60px rgba(0,0,0,0.6);
+    }
+
+    .demo-header {
+      padding: 1.25rem 1.75rem;
+      background: rgba(3, 7, 18, 0.6);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .demo-body {
+      display: grid;
+      grid-template-columns: 1fr 1.2fr;
+      gap: 0;
+    }
+
+    .demo-input-side {
+      padding: 1.75rem;
+      border-right: 1px solid var(--card-border);
+      background: rgba(17, 24, 39, 0.5);
+    }
+
+    .demo-output-side {
+      padding: 1.75rem;
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .tag {
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 0.2rem 0.55rem;
+      border-radius: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .tag-danger { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .tag-warning { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+
+    /* Features Grid */
+    .section-title-wrap {
+      text-align: center;
+      max-width: 700px;
+      margin: 0 auto 3.5rem auto;
+    }
+    .section-title {
+      font-size: 2.3rem;
+      font-weight: 800;
+      letter-spacing: -0.8px;
+      margin-bottom: 0.75rem;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.5rem;
+      max-width: 1200px;
+      margin: 0 auto 6rem auto;
+      padding: 0 1.5rem;
+    }
+
+    .feature-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 2rem;
+      transition: all 0.3s;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(99, 102, 241, 0.4);
+      box-shadow: 0 15px 35px rgba(99, 102, 241, 0.1);
+    }
+
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: rgba(99, 102, 241, 0.12);
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      margin-bottom: 1.25rem;
+      color: #818cf8;
+    }
+
+    /* How It Works Steps */
+    .steps-container {
+      max-width: 1100px;
+      margin: 0 auto 6rem auto;
+      padding: 0 1.5rem;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+      position: relative;
+    }
+
+    .step-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 2rem;
+      position: relative;
+    }
+
+    .step-num {
+      position: absolute;
+      top: 1.25rem;
+      right: 1.5rem;
+      font-size: 3rem;
+      font-weight: 800;
+      color: rgba(255, 255, 255, 0.04);
+      font-family: var(--font-mono);
+    }
+
+    /* Pricing Teaser */
+    .pricing-teaser {
+      max-width: 1000px;
+      margin: 0 auto 6rem auto;
+      padding: 3rem 2rem;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(245, 158, 11, 0.05));
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      border-radius: 20px;
+      text-align: center;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--card-border);
+      padding: 3rem 2rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      background: rgba(3, 7, 18, 0.95);
+    }
+
+    @media (max-width: 900px) {
+      .hero-title { font-size: 2.5rem; }
+      .stats-bar { grid-template-columns: repeat(2, 1fr); }
+      .demo-body { grid-template-columns: 1fr; }
+      .features-grid, .steps-container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="glow-bg"></div>
+
+  <!-- Navbar -->
+  <header class="navbar">
+    <a href="/" class="brand">
+      <div class="brand-logo">V</div>
+      <span>Vasooli / Wemboo</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#features" class="nav-link">Features</a>
+      <a href="#how-it-works" class="nav-link">How It Works</a>
+      <a href="/pricing" class="nav-link">Pricing</a>
+      <a href="/workbench" class="nav-link" style="color: #818cf8;">Developer Workbench</a>
+      <a href="/app" class="btn btn-primary">Open App →</a>
+    </nav>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="pill-badge">
+      <span>⚖️ Enforcing MSME Development Act 2006 & Section 43B(h)</span>
+    </div>
+    <h1 class="hero-title">
+      Turn Delayed Payments Into <br>
+      <span class="hero-gradient">Enforceable Legal Recoveries</span>
+    </h1>
+    <p class="hero-desc">
+      India's 63M MSMEs lose ₹10.7 Lakh Crore every year to delayed buyer payments. 
+      Vasooli instantly audits buyer contracts, flags illegal 90-day credit clauses, 
+      and auto-drafts statutory recovery notices & MSME Samadhaan complaints in seconds.
+    </p>
+
+    <div class="hero-cta-group">
+      <a href="/app#analyze" class="btn btn-primary" style="padding: 0.85rem 1.85rem; font-size: 1.05rem;">
+        ⚡ Audit Your Contract Free
+      </a>
+      <a href="/pricing" class="btn btn-secondary" style="padding: 0.85rem 1.5rem; font-size: 1.05rem;">
+        View SaaS Pricing (₹999/mo)
+      </a>
+    </div>
+  </section>
+
+  <!-- Stats Banner -->
+  <section class="stats-bar">
+    <div class="stat-item">
+      <div class="stat-number">63 Million</div>
+      <div class="stat-label">Indian MSMEs Protected</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number" style="color: #f87171;">₹10.7L Cr</div>
+      <div class="stat-label">Trapped in Delayed Dues</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number" style="color: #34d399;">45 Days Max</div>
+      <div class="stat-label">MSME Act Section 15 Statutory Cap</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number" style="color: #fbbf24;">3x RBI Rate</div>
+      <div class="stat-label">Mandatory Compound Interest</div>
+    </div>
+  </section>
+
+  <!-- Interactive Live Audit Widget -->
+  <section class="demo-section">
+    <div class="section-title-wrap">
+      <h2 class="section-title">See How Vasooli Protects Your Cash Flow</h2>
+      <p style="color: var(--text-muted);">Watch how our compliance engine flags statutory violations in real-time.</p>
+    </div>
+
+    <div class="demo-card">
+      <div class="demo-header">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div style="width: 12px; height: 12px; border-radius: 50%; background: #ef4444;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 50%; background: #f59e0b;"></div>
+          <div style="width: 12px; height: 12px; border-radius: 50%; background: #10b981;"></div>
+          <span style="font-size: 0.85rem; color: var(--text-muted); margin-left: 0.5rem; font-family: var(--font-mono);">Reliance_Logistics_PO_Clause.pdf</span>
+        </div>
+        <span class="tag tag-danger">High Risk Detected (Score 15/100)</span>
+      </div>
+
+      <div class="demo-body">
+        <div class="demo-input-side">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.75rem;">Offending Buyer Agreement Clause:</div>
+          <div style="background: rgba(0,0,0,0.4); padding: 1rem; border-radius: 8px; font-family: var(--font-mono); font-size: 0.85rem; color: #fca5a5; line-height: 1.6; border: 1px solid rgba(239, 68, 68, 0.2);">
+            "Clause 14.2: Payment shall be released by Buyer within <strong>90 (ninety) days</strong> from receipt of accepted goods. <strong>No interest or penalty</strong> shall accrue on delayed disbursements under any circumstances."
+          </div>
+          <div style="margin-top: 1.25rem;">
+            <a href="/app#analyze" class="btn btn-secondary" style="width: 100%; font-size: 0.85rem;">Upload Your Agreement →</a>
+          </div>
+        </div>
+
+        <div class="demo-output-side">
+          <div style="font-size: 0.82rem; font-weight: 700; color: #a5b4fc; text-transform: uppercase; margin-bottom: 0.75rem;">⚡ Vasooli AI Legal Remediation:</div>
+
+          <div style="margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <strong style="color: #f87171; font-size: 0.88rem;">1. Section 15 Violation (45-Day Cap)</strong>
+              <span class="tag tag-danger">Void ab initio</span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">Credit term cannot exceed 45 days. Any contract clause specifying 90 days is legally void.</p>
+          </div>
+
+          <div style="margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--card-border);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <strong style="color: #f87171; font-size: 0.88rem;">2. Section 16 Mandatory Compound Interest</strong>
+              <span class="tag tag-danger">Mandatory Penalty</span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">Law overrides contract: Buyer must pay 3x RBI rate compound interest with monthly rests.</p>
+          </div>
+
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <strong style="color: #fcd34d; font-size: 0.88rem;">3. Income Tax Section 43B(h) Leverage</strong>
+              <span class="tag tag-warning">Buyer Disallowance</span>
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">Buyer loses entire tax deduction if unpaid past 45 days. Major leverage for suppliers.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features Grid -->
+  <section id="features">
+    <div class="section-title-wrap">
+      <h2 class="section-title">Engineered Specifically for Indian MSME Protection</h2>
+      <p style="color: var(--text-muted);">Built with AWS Bedrock, hybrid RAG over Indian statutory jurisprudence, and Razorpay billing.</p>
+    </div>
+
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon">🛡️</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">Section 15 Strict Audit</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">Automatically parses buyer agreements, POs, and master service agreements to ensure payment terms do not exceed 45 days.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📈</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">Section 16 Interest Calculator</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">Computes compound penal interest at 3x the RBI Bank Rate from the due date, irrespective of any disclaimer signed by the supplier.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">⚖️</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">Sec 43B(h) Tax Disallowance</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">Generates tax liability warnings reminding large enterprise buyers that delayed supplier dues increase their taxable income.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">📝</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">Samadhaan Complaint Drafter</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">One-click generation of Form 1 applications under Section 18 for direct filing on the MSME Samadhaan Facilitation Council portal.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🏢</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">Multi-Tenant Workspaces</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">Team collaboration for accounting, finance, and legal teams to manage recovery notices across all corporate buyers.</p>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">🔌</div>
+        <h3 style="font-size: 1.15rem; margin-bottom: 0.5rem;">B2B API & Tally/ERP Connector</h3>
+        <p style="color: var(--text-muted); font-size: 0.88rem;">Direct REST API key access to automate contract checking straight from your invoicing software or ERP workflows.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- How It Works -->
+  <section id="how-it-works">
+    <div class="section-title-wrap">
+      <h2 class="section-title">From Invalidation to Recovery in 3 Steps</h2>
+      <p style="color: var(--text-muted);">Simple, automated compliance workflow for MSME business owners.</p>
+    </div>
+
+    <div class="steps-container">
+      <div class="step-card">
+        <div class="step-num">01</div>
+        <h3 style="font-size: 1.2rem; margin-bottom: 0.75rem;">1. Upload Agreement</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">Drop your buyer agreement, purchase order, or paste the payment clause. AWS Textract & Bedrock extracts terms instantly.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">02</div>
+        <h3 style="font-size: 1.2rem; margin-bottom: 0.75rem;">2. Compliance Check</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">The multi-agent legal engine grounds against the MSMED Act 2006, Section 15, 16, and Income Tax Section 43B(h) statutes.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-num">03</div>
+        <h3 style="font-size: 1.2rem; margin-bottom: 0.75rem;">3. Auto-Draft Notice</h3>
+        <p style="color: var(--text-muted); font-size: 0.9rem;">Download statutory counter-clauses and pre-filled MSME Samadhaan arbitration notices ready for signature and submission.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing Teaser -->
+  <section class="pricing-teaser">
+    <h2 style="font-size: 2rem; font-weight: 800; margin-bottom: 0.75rem;">Simple, Transparent SaaS Pricing</h2>
+    <p style="color: var(--text-muted); margin-bottom: 2rem;">Start free with 5 audits/month. Upgrade to Pro at ₹999/month for growing MSMEs.</p>
+    <a href="/pricing" class="btn btn-primary" style="padding: 0.85rem 2rem; font-size: 1rem;">View All Pricing Plans →</a>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div style="max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+      <div style="display: flex; align-items: center; gap: 0.5rem; font-weight: 700; color: white;">
+        <div class="brand-logo" style="width: 28px; height: 28px; font-size: 0.85rem;">V</div>
+        <span>Vasooli / Wemboo Compliance Platform</span>
+      </div>
+      <div>
+        <span>Built on AWS Bedrock • Micro, Small and Medium Enterprises Development Act 2006</span>
+      </div>
+      <div style="display: flex; gap: 1.5rem;">
+        <a href="/pricing" style="color: var(--text-muted); text-decoration: none;">Pricing</a>
+        <a href="/app" style="color: var(--text-muted); text-decoration: none;">Dashboard</a>
+        <a href="/workbench" style="color: var(--text-muted); text-decoration: none;">Developer Workbench</a>
+      </div>
+    </div>
+    <div style="margin-top: 1.5rem; color: #6b7280; font-size: 0.75rem;">
+      Disclaimer: Vasooli provides automated statutory compliance auditing and document drafting assistance. It does not provide formal attorney-client legal counsel.
+    </div>
+  </footer>
+
+</body>
+</html>

@@ -1,223 +1,198 @@
-# 👑 Wemboo (Monarch) — Enterprise-Grade Multi-Agent AI Platform
+# 🚀 Vasooli / Wemboo — AI Payment Compliance & Recovery SaaS for 63M Indian MSMEs
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-blue.svg)](https://langchain-ai.github.io/langgraph/)
-[![Groq Vision](https://img.shields.io/badge/Groq-Vision_llama--3.2-orange.svg)](https://groq.com/)
-[![AWS Cloud](https://img.shields.io/badge/AWS-EC2_|_S3_|_SSM_|_CloudWatch-ff9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/)
-[![AWS Cost](https://img.shields.io/badge/AWS_Cost-$0--$5/month-brightgreen.svg)](https://aws.amazon.com/free/)
+[![AWS Cloud](https://img.shields.io/badge/AWS-Bedrock_|_Textract_|_S3_|_Cognito-ff9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/)
+[![Razorpay](https://img.shields.io/badge/Razorpay-Billing_&_Webhooks-0C2340.svg?style=flat&logo=razorpay)](https://razorpay.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Multi--Tenant_Aurora-336791.svg?style=flat&logo=postgresql)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://www.docker.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Wemboo (powered by the Monarch Engine)** is a production-grade, horizontally scalable multi-agent AI orchestration platform. Engineered with **LangGraph (Async)**, **ReAct Tool-Use Planning**, **Agentic RAG (HyDE & Query Decomposition)**, **Multimodal Vision**, **Cognito JWT Auth & RBAC**, **CloudWatch Observability**, and **Real-Time Token Streaming (SSE)**.
-
-Built specifically for AWS-native deployment on the **$0–$5/month Free Tier Stack** while targeting top scores across **"Build It"**, **"Ship It"**, and **"Best UI"** tracks.
+> **"63 Million Indian MSMEs lose ₹10.7 Lakh Crore every year to delayed payments."**  
+> **Vasooli / Wemboo** is an enterprise-grade multi-tenant SaaS application that audits buyer agreements, flags illegal 90-day credit clauses under the **MSME Development Act 2006 (Sections 15 & 16)**, computes **Section 43B(h)** Income Tax disallowances, and auto-drafts legal notices & **MSME Samadhaan Form 1** arbitration complaints in seconds.
 
 ---
 
-## 🏗 System Architecture
+## 🏗 SaaS System Architecture
 
-```mermaid
-flowchart TD
-    Client([User / Web Workbench / REST Client]) --> |HTTP / SSE Token Stream| API[FastAPI Backend api.py]
-    
-    subgraph SecurityAuth ["Security, Auth & Compliance Layer"]
-        API --> RateLimiter[Distributed Rate Limiter - ElastiCache Redis / In-Memory]
-        RateLimiter --> AuthMiddleware[Amazon Cognito JWT Auth & RBAC Middleware]
-        AuthMiddleware --> InputGuard[Input Guardrail: PII Masking, Luhn Validation & ML LLM-Judge]
-    end
-
-    subgraph Agents ["LangGraph Async Multi-Agent Engine (Agents/)"]
-        InputGuard --> Orchestrator["Async Orchestrator Router (router.py)"]
-        Orchestrator --> |Structured Decision| RouteSwitch{Route Selector}
-        
-        RouteSwitch -->|General Reasoning & Tools| Planner["ReAct Planner Agent (planner.py)"]
-        RouteSwitch -->|Live Info / Web Search| Research["Async Research Agent (research.py)"]
-        RouteSwitch -->|Document Corpus| RAGNode["Agentic RAG Agent (rag.py)"]
-        RouteSwitch -->|Image / Visual Prompt| VisionNode["Groq Vision Agent (vision.py)"]
-        RouteSwitch -->|Compound Multi-Hop Query| ParallelNode["Parallel Agent Fan-Out (parallel.py)"]
-        
-        Planner --> Tools["Agent Tools: Calculator, Datetime, Memory, Code Sandbox"]
-        RAGNode --> QueryEngine["Agentic RAG Engine: HyDE, Sub-Query Decomposition, Feedback Rewriting"]
-        
-        Planner --> Reflection["Reflection Critic Node (reflection.py)"]
-        Research --> Reflection
-        RAGNode --> Reflection
-        VisionNode --> Reflection
-        ParallelNode --> Reflection
-
-        Reflection -->|Refinement Needed & Retry <= 2| RouteSwitch
-        Reflection -->|Pass / Complete| OutputGuard[Output Safety & Faithfulness Guardrail]
-    end
-
-    subgraph AWSInfra ["AWS-Native Cloud Infrastructure Layer ($0–$5/mo Stack)"]
-        RAGNode --> S3Storage[Amazon S3 Document Store s3_manager.py]
-        RAGNode --> VectorStore[(Persistent FAISS / OpenSearch Vector Store)]
-        API --> SQLiteDB[(Persistent SQLite on EBS / Aurora PostgreSQL)]
-        API --> SecretsMgr[AWS SSM Parameter Store / Secrets Manager]
-        API --> AuditLogger[CloudWatch Logs, Metrics & Audit Trail]
-    end
-
-    OutputGuard --> FinalOutput([Client SSE Token Stream + Audit Event])
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│                             PUBLIC FRONTEND                              │
+│   / (Landing Page)     /pricing (SaaS Tiers)     /workbench (Dev Tool)   │
+└──────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│                       SECURITY & TENANT LAYER                            │
+│   Amazon Cognito JWT / UserContext ──> Server-Side Org Derivation (IDOR-Safe)│
+└──────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│                   PLAN ENFORCEMENT MIDDLEWARE                            │
+│   Free (5 audits/mo)  │  Pro (50 audits/mo)  │  Enterprise (Unlimited)   │
+│   Monthly Quota Tracking  •  Async Usage Event Metering                  │
+└──────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    CORE SAAS PRODUCT & RECOVERY ENGINE                   │
+│   POST /api/analyse:                                                     │
+│   • MSME Act Sec 15 (Mandatory 45-day credit cap enforcement)            │
+│   • MSME Act Sec 16 (Compound interest @ 3x RBI Bank Rate calculation)   │
+│   • Income Tax Sec 43B(h) (Buyer expense disallowance leverage)          │
+│   • Auto-Draft Form 1 (MSEFC Samadhaan dispute application)              │
+│   • Substitute Counter-Clause generation                                 │
+└──────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│                   INTELLIGENCE ENGINE (LangGraph + RAG)                  │
+│   AWS Bedrock / Groq LLM  •  Hybrid FAISS/BM25  •  Multimodal Vision     │
+└──────────────────────────────────────────────────────────────────────────┘
+                                      ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│                      BILLING & DEVELOPER PLATFORM                        │
+│   • Razorpay Order Checkout (POST /api/billing/checkout)                 │
+│   • Timing-Safe HMAC-SHA256 Webhooks (POST /api/billing/webhook)         │
+│   • B2B API Key Management (GET/POST/DELETE /api/keys) for Tally & ERPs  │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 💰 The $0–$5/Month AWS Stack (Cost-Optimized)
+## ⚖️ Indian Statutory Legal Protections Enforced
 
-Monarch utilizes AWS Free Tier services and low-cost serverless resources without sacrificing enterprise architecture:
-
-| AWS Service | Role in Monarch | Free Tier Allowance | Effective Cost |
-| :--- | :--- | :--- | :--- |
-| **EC2 `t3.micro`** | Monarch API backend & LangGraph runtime | 750 hours/month (12 mos) | **$0.00** |
-| **EBS (20GB gp3)** | Persistent SQLite database (`monarch.db`) & FAISS index | 30 GB free | **$0.00** |
-| **Amazon S3** | Raw document store (`s3://monarch-docs`) & frontend assets | 5 GB storage + 20K GETs | **$0.00** |
-| **Amazon CloudFront** | Global CDN for fast static frontend distribution | 1 TB data transfer/month | **$0.00** |
-| **SSM Parameter Store** | Secure API key & secret retrieval | Standard tier: Free forever | **$0.00** |
-| **Amazon CloudWatch** | Structured audit logging & operational metrics | 5 GB logs + 10 metrics | **$0.00** |
-| **Amazon Cognito** | User directory, JWT token issuance & RBAC | 50,000 MAU free tier | **$0.00** |
-| **Groq API / Bedrock** | Ultra-low latency LLM generation (Bedrock fallback) | Free Groq tier / Token pay | **$0.00 – $5.00** |
-| **TOTAL** | **Full Production Deployment** | — | **$0 – $5/month** |
+| Indian Statute | Legal Mandate | How Vasooli Enforces It |
+|---|---|---|
+| **MSME Act 2006, Section 15** | Payment period agreed in writing **cannot exceed 45 days** (15 days if no agreement). | Flags 60/90/120-day clauses as *void ab initio*; auto-drafts compliant 45-day substitute clauses. |
+| **MSME Act 2006, Section 16** | Mandatory compound interest with monthly rests at **three times (3x) the RBI Bank Rate** on delayed dues. Overrides any contract clause. | Computes exact compound interest from the due date and inserts statutory interest claims into demand notices. |
+| **Income Tax Act, Section 43B(h)** | Any sum payable to Micro/Small enterprise remaining unpaid beyond Section 15 limits is **disallowed as a business deduction** for the buyer. | Generates tax disallowance notices showing the buyer their increased corporate tax liability if they fail to pay on time. |
+| **MSME Act 2006, Section 18** | Direct right of reference to the Micro and Small Enterprise Facilitation Council (**MSEFC / Samadhaan**). | One-click generation of formatted **Form 1 Legal Complaint Applications** ready for portal filing. |
 
 ---
 
-## 🏆 Hackathon Winning Track Alignment
-
-* **Track 1: "Build It" (Open-source AWS Stack)**: Integrates Amazon OpenSearch vector indexing templates, AWS SAM-compatible sandboxed code execution, and modular Infrastructure-as-Code.
-* **Track 2: "Ship It" (Live Production Deployment)**: Production-ready EC2 container deployment with EBS disk persistence, CloudFront CDN, CloudWatch metrics, and one-command deployment (`./deploy.sh`).
-* **Track 3: "Best UI"**: Modern dark mode glassmorphism Web Workbench with typewriter-style Server-Sent Events (SSE) token streaming and drag-and-drop multimodal document uploads.
-
----
-
-## 📁 Repository Directory Structure
+## 🌟 5-Page SaaS Product Experience
 
 ```
-Wemboo/
-├── .env                        # Environment API keys & configurations
-├── Dockerfile                  # Container build instructions with OCR & PDF libraries
-├── docker-compose.yml          # Multi-container orchestration file
-├── deploy.sh                   # One-command automated deployment script
-├── pyproject.toml              # Dependencies and build metadata
-├── pytest.ini                  # Pytest configuration & test runner settings
-├── requirements.txt            # Python dependencies (LangGraph, Groq, FAISS, PyPDF, etc.)
-├── main.py                     # CLI application entrypoint & benchmark test runner
-├── api.py                      # Production FastAPI REST service with SSE streaming & CRUD endpoints
-├── index.html                  # Monarch Web Workbench HTML interface
-├── static/                     # Web UI assets
-│   ├── app.js                  # Frontend REST API integration & image uploader
-│   └── style.css               # Glassmorphism dark mode stylesheet
-│
-├── Agents/                     # LangGraph Async Multi-Agent Workflow Core
-│   ├── state.py                # State schema & Pydantic RouteDecision model
-│   ├── router.py               # Async Orchestrator routing node with memory injection
-│   ├── planner.py              # ReAct multi-step tool-use planner agent node
-│   ├── research.py             # Async live web research agent node
-│   ├── rag.py                  # Agentic document RAG agent node
-│   ├── vision.py               # Multimodal Groq Vision agent node
-│   ├── parallel.py             # Parallel agent fan-out & result merger node
-│   ├── reflection.py           # Self-correction reflection critic node
-│   ├── graph.py                # LangGraph workflow compiler
-│   └── tools/                  # Executable Agent Tools
-│       ├── calculator.py       # Safe math AST evaluation tool
-│       ├── datetime_tool.py    # UTC system date/time tool
-│       ├── memory_tool.py      # Long-term memory search & store tools
-│       └── code_executor.py    # Sandboxed Python code execution tool
-│
-├── RAG/                        # Multimodal Agentic RAG Subsystem
-│   ├── embeddings.py           # HuggingFace embeddings wrapper
-│   ├── retriever.py            # Hybrid retrieval (FAISS + BM25 + Reciprocal Rank Fusion)
-│   ├── manager.py              # Document loader (PDF, DOCX, TXT, OCR) & vector manager
-│   └── query_engine.py         # Agentic query engine (HyDE, Sub-Query Decomposition, Rewriting)
-│
-├── auth/                       # Enterprise Authentication & RBAC
-│   ├── cognito.py              # Amazon Cognito JWT verification middleware
-│   ├── rbac.py                 # Role-based access control (Admin, User, ReadOnly)
-│   └── dependencies.py         # FastAPI get_current_user dependency injection
-│
-├── guardrails/                 # Security, Safety, & Output Verification
-│   ├── input_guard.py          # PII masking (Luhn Cards, Emails, Keys) & ML LLM-Judge Classifier
-│   └── output_guard.py         # Output safety (Toxicity, Bias, PII Leakage) & Faithfulness verification
-│
-├── audit/                      # Structured Audit Logging & GDPR Compliance
-│   ├── logger.py               # Structured CloudWatch JSON audit logger
-│   └── data_retention.py       # GDPR full data erasure engine (DELETE /api/user/{user_id}/data)
-│
-├── storage/                    # Cloud Storage Integrations
-│   └── s3_manager.py           # Amazon S3 document manager & presigned URL generator
-│
-├── infra/                      # Cloud Infrastructure Provisioning
-│   └── opensearch.py           # Amazon OpenSearch Serverless collection & k-NN index builder
-│
-├── SQL/                        # Persistence & Database Repositories
-│   ├── schema.sql              # PostgreSQL + pgvector schema
-│   ├── db.py                   # Async Aurora PostgreSQL connection pool & SQLite manager
-│   ├── repository.py           # MemoryRepository for durable chat & memory storage
-│   └── memory_consolidator.py  # Asynchronous background memory fact distillation
-│
-├── tests/                      # Automated Pytest Suite (>80% Coverage Target)
-│   ├── conftest.py             # Pytest fixtures & TestClient setup
-│   ├── test_input_guard.py     # PII masking & injection unit tests
-│   ├── test_output_guard.py    # Faithfulness verification unit tests
-│   ├── test_router.py          # Async router unit tests
-│   ├── test_rag_manager.py     # RAG ingestion & retrieval unit tests
-│   ├── test_rate_limiter.py    # Sliding window rate limiter unit tests
-│   ├── test_api.py             # REST API integration tests
-│   ├── test_phase2.py          # AWS infrastructure unit tests
-│   ├── test_phase3.py          # Tools, HyDE, code execution unit tests
-│   └── test_phase4.py          # Auth, Luhn validation, audit & GDPR unit tests
-│
-└── utils/                      # Utilities & Middleware
-    ├── config.py               # AWS Secrets Manager fetcher & Groq model resolver
-    ├── logger.py               # Centralized logging instance
-    ├── retry.py                # Exponential backoff retry decorator (@llm_retry)
-    └── rate_limiter.py         # ElastiCache Redis & in-memory sliding window rate limiter
+/                → Public Landing Page (High-converting copy, crisis stats, live audit widget)
+/pricing         → Public Pricing Tiers (Free ₹0, Pro ₹999/mo, Enterprise ₹4,999/mo)
+/app             → Customer Dashboard (Live quota meter, recent audit reports, quick actions)
+/app#analyze     → 3-Step Audit Wizard (Upload / Paste clause → Bedrock Reasoning → Legal Report)
+/app#history     → Audit Repository (Searchable, filterable history of audited contracts)
+/app#settings    → Org Settings (API Key generation, Razorpay upgrade modal, tenant profile)
+/workbench       → Developer Multi-Agent Workbench (Internal tool for debugging RAG & agents)
 ```
 
 ---
 
-## 🌟 Key Technical Capabilities
+## 💳 SaaS Subscription Tiers & Billing
 
-### 1. ⚡ Non-Blocking Async Execution & Token SSE Streaming
-All LangGraph agent nodes are native `async def` routines using `ainvoke()`. The streaming endpoint (`POST /api/chat/stream`) utilizes `graph.astream_events()` to pipe real-time token chunks and route events directly to the client via Server-Sent Events.
-
-### 2. 🧰 ReAct Multi-Step Tool-Use Planner
-Equipped with `llm.bind_tools()` enabling the planner agent to reason, invoke tools, inspect observations, and formulate verified responses:
-- **Calculator Tool**: Evaluates complex mathematical expressions safely using an AST evaluator.
-- **System Datetime Tool**: Real-time UTC time, date, and calendar context.
-- **Long-Term Memory Tool**: Searches and records user preferences across sessions.
-- **Python Code Execution Sandbox**: Executes data scripts in an isolated subprocess with timeout protection.
-
-### 3. 🧠 Agentic RAG with HyDE & Multi-Hop Decomposition
-Goes beyond naive semantic search:
-- **HyDE (Hypothetical Document Embeddings)**: Generates hypothetical response passages to search vector spaces more accurately.
-- **Query Decomposition**: Deconstructs multi-hop research queries into targeted sub-queries.
-- **Feedback-Driven Query Rewriting**: If the reflection node flags ungrounded output, the query engine rewrites search queries automatically.
-
-### 4. 🔀 Concurrent Agent Fan-Out
-Handles compound prompts (e.g., *"Summarize the uploaded financial report and fetch today's market news"*) by dispatching tasks to Research and RAG agents concurrently using `asyncio.gather()` and merging their outputs into a unified response.
-
-### 5. 🛡️ Enterprise Security, Guardrails & GDPR Compliance
-- **Cognito JWT & RBAC**: Authorization middleware validating tokens and enforcing `Admin`, `User`, or `ReadOnly` permissions.
-- **Luhn Algorithm & PII Redaction**: Fast regex redacting enhanced with Luhn validation for credit cards to eliminate false positives.
-- **ML LLM-Judge Injection Classifier**: An adversarial classification layer blocking instruction overrides and prompt injection.
-- **Output Safety Guardrail v2**: Checks for toxic content, bias, and PII/API key leakage.
-- **GDPR Data Erasure**: `DELETE /api/user/{user_id}/data` purges database records, chat histories, user memories, and vector index chunks.
+| Feature | Free Tier | Pro Plan (₹999/mo) | Enterprise (₹4,999/mo) |
+|---|:---:|:---:|:---:|
+| **Monthly Contract Audits** | 5 / month | **50 / month** | **Unlimited** |
+| **Sec 15 45-Day Violation Check** | ✓ Included | ✓ Included | ✓ Included |
+| **Sec 16 3x RBI Interest Calculator**| ✓ Included | ✓ Included | ✓ Included |
+| **Sec 43B(h) Tax Disallowance Alert**| Basic | ✓ Full Computation | ✓ Custom Corporate Tax Report |
+| **MSME Samadhaan Form 1 Drafter** | Text Only | ✓ PDF Download | ✓ Batch Dispute Filing |
+| **B2B Developer API Access** | ✕ | ✓ Included (1 Key) | ✓ Unlimited Keys + Webhooks |
+| **Tally Prime / ERP Connector** | ✕ | ✕ | ✓ Direct Connector |
+| **Payment & Billing Gateway** | Free | **Razorpay INR Auto-Renew** | **Razorpay / Invoice** |
 
 ---
 
 ## 📡 Complete REST API Reference
 
-| Method | Endpoint | Description | Auth Required |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/chat` | Multi-agent execution & background fact distillation | Optional |
-| `POST` | `/api/chat/stream` | Token-level Server-Sent Events (SSE) streaming | Optional |
-| `POST` | `/api/ingest` | Upload document to S3, chunk, and index into RAG | Optional |
-| `GET` | `/api/documents/{user_id}` | List user documents and chunks metadata | Optional |
-| `DELETE` | `/api/documents/{user_id}` | Delete all user document chunks from RAG | Optional |
-| `GET` | `/api/memories/{user_id}` | Fetch active long-term memories for user | Optional |
-| `POST` | `/api/memories` | Manually insert a long-term memory fact | Optional |
-| `DELETE` | `/api/user/{user_id}/data`| **GDPR Purge**: Erase all chat, memory, and RAG data | User / Admin |
-| `GET` | `/api/admin/users` | List all registered user accounts and status | Admin |
-| `GET` | `/api/health` | System health check, active model, and stats | None |
+### Core Compliance & SaaS Endpoints
+
+| Method | Endpoint | Description | Auth Scoped |
+|---|---|---|:---:|
+| `POST` | `/api/analyse` | **Core SaaS**: Ingests contract clause/file, runs statutory compliance check, returns `AnalysisReport` | Verified Org |
+| `GET` | `/api/analyses` | List all historical compliance audit reports for user's organization | Verified Org |
+| `GET` | `/api/analyses/{id}` | Retrieve full structured analysis report by report ID | Verified Org |
+| `POST` | `/api/org/create` | Create a new tenant organization / workspace | User |
+| `GET` | `/api/org/{id}` | Retrieve organization profile, tier, and member details | Verified Org |
+| `GET` | `/api/org/{id}/usage` | Current month usage versus plan quota limits | Verified Org |
+| `POST` | `/api/org/{id}/invite` | Invite team members to organization with RBAC role | Admin |
+| `POST` | `/api/billing/checkout`| Initiate Razorpay order session for Pro/Enterprise plan upgrades | Verified Org |
+| `POST` | `/api/billing/webhook` | **Razorpay Webhook**: HMAC-SHA256 signature verification & plan upgrade | Gateway Verified |
+| `GET` | `/api/keys` | List active B2B Developer API keys for ERP/Tally integration | Verified Org |
+| `POST` | `/api/keys` | Generate new SHA-256 hashed `wm_live_...` API key | Verified Org |
+| `DELETE` | `/api/keys/{id}` | Revoke an active API key | Verified Org |
+
+### Multi-Agent & RAG Workbench Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/chat` | Multi-agent execution with LangGraph and long-term memory distillation |
+| `POST` | `/api/chat/stream` | Token-level Server-Sent Events (SSE) streaming output |
+| `POST` | `/api/ingest` | Upload document to S3, chunk, and index into FAISS RAG vector store |
+| `GET` | `/api/documents/{user_id}` | List ingested knowledge documents and metadata |
+| `DELETE`| `/api/documents/{user_id}` | Purge user document chunks from RAG vector index |
+| `GET` | `/api/memories/{user_id}` | Fetch active long-term distilled user memories |
+| `POST` | `/api/memories` | Manually insert long-term user memory fact |
+| `DELETE`| `/api/user/{user_id}/data`| **GDPR Erasure**: Purge all chat, memory, and RAG data |
+| `GET` | `/api/health` | System health, model readiness, and LangSmith state |
+
+---
+
+## 🗄 Database Schema (PostgreSQL + SQLite Parity)
+
+```sql
+-- PostgreSQL Schema (SQL/schema.sql) / SQLite Dev (SQL/db.py)
+
+-- Organizations (Tenant & Billing Entity)
+CREATE TABLE organizations (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                 TEXT NOT NULL,
+    plan                 TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'pro', 'enterprise')),
+    monthly_quota        INTEGER NOT NULL DEFAULT 5,
+    current_usage        INTEGER NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    billing_email        TEXT,
+    razorpay_customer_id TEXT
+);
+
+-- Organization Members (JWT Sub -> Org mapping; IDOR-safe)
+CREATE TABLE org_members (
+    user_id   TEXT NOT NULL,
+    org_id    UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    role      TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+    joined_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, org_id)
+);
+
+-- Usage Events Metering
+CREATE TABLE usage_events (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id      UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id     TEXT NOT NULL,
+    event_type  TEXT NOT NULL CHECK (event_type IN ('analysis','ingest','chat')),
+    tokens_used INTEGER DEFAULT 0,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+-- Developer B2B API Keys
+CREATE TABLE api_keys (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id       UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    key_hash     TEXT UNIQUE NOT NULL,
+    key_prefix   TEXT NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT now(),
+    last_used_at TIMESTAMPTZ,
+    is_active    BOOLEAN DEFAULT true
+);
+
+-- Analysis History Reports
+CREATE TABLE analyses_history (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id           UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id          TEXT NOT NULL,
+    buyer_name       TEXT NOT NULL,
+    file_name        TEXT,
+    compliance_score INTEGER NOT NULL,
+    violations_count INTEGER NOT NULL DEFAULT 0,
+    report_data      JSONB NOT NULL,
+    created_at       TIMESTAMPTZ DEFAULT now()
+);
+```
 
 ---
 
@@ -225,26 +200,30 @@ Handles compound prompts (e.g., *"Summarize the uploaded financial report and fe
 
 ### 1. Prerequisites
 - Python 3.11+
-- Groq API Key (Sign up at [console.groq.com](https://console.groq.com))
+- Groq API Key or AWS Bedrock Access
 
 ### 2. Environment Configuration
-Clone the repository and set up your `.env`:
+Clone the repository and configure your `.env`:
 
 ```bash
 cp .env.example .env
 ```
 
-Set your API keys:
 ```env
+# LLM & Reasoning Configuration
 GROQ_API_KEY=gsk_your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-20b
-VISION_MODEL=llama-3.2-11b-vision-preview
 
-# Optional AWS Cloud Integrations
-DATABASE_URL=postgresql://user:pass@aurora-endpoint:5432/monarch
-REDIS_URL=redis://localhost:6379/0
-S3_DOCUMENTS_BUCKET=monarch-docs-storage
+# Razorpay Payments Configuration
+RAZORPAY_KEY_ID=rzp_test_your_key_id
+RAZORPAY_KEY_SECRET=your_razorpay_secret_key
+
+# Database (PostgreSQL in Production, SQLite in Dev)
+DATABASE_URL=sqlite:///monarch.db
+
+# Optional AWS Services
 AWS_REGION=us-east-1
+S3_DOCUMENTS_BUCKET=monarch-docs-storage
 ```
 
 ### 3. Install Dependencies
@@ -254,46 +233,41 @@ pip install -r requirements.txt
 
 ---
 
-## 💻 Running & Deployment
+## 💻 Running the Application
 
-### Option A: One-Command Deployment Script (Easiest)
+### Option A: Production Web Server
 ```bash
-chmod +x deploy.sh
-./deploy.sh
+uvicorn api:app --host 0.0.0.0 --port 8000 --reload
 ```
+- 🌐 **Landing Page**: `http://localhost:8000/`
+- 💳 **Pricing Page**: `http://localhost:8000/pricing`
+- 📱 **SaaS Application**: `http://localhost:8000/app`
+- 🛠️ **Developer Workbench**: `http://localhost:8000/workbench`
+- 📖 **Interactive Swagger Docs**: `http://localhost:8000/docs`
 
-### Option B: Docker Compose (Production Ready)
+### Option B: Docker Compose
 ```bash
 docker-compose up -d --build
-```
-- Access **Web Workbench**: `http://localhost:8000`
-- Access **Swagger API Docs**: `http://localhost:8000/docs`
-
-### Option C: Native Python Server
-```bash
-python main.py --serve-api
-```
-
-### Option D: CLI Interactive Chat
-```bash
-python main.py
 ```
 
 ---
 
-## 🧪 Automated Testing & Evaluation Harness
+## 🧪 Automated Testing
 
-Run the full automated test suite with code coverage:
-
-```bash
-pytest tests/ --cov=. --cov-report=term-missing
-```
-
-Run the multi-agent regression benchmark harness:
+Run the full automated test suite including the SaaS multi-tenant compliance suite:
 
 ```bash
-python main.py --run-harness
+pytest tests/ -v
 ```
+
+Tests verify:
+- ✅ SQLite and PostgreSQL schema initialization
+- ✅ Section 15 (45-day cap) and Section 16 (3x RBI interest) violation detection
+- ✅ Pre-drafted MSME Samadhaan dispute notice generation
+- ✅ Monthly quota enforcement (HTTP 429 when quota exceeded)
+- ✅ Tenant isolation and IDOR-safe server-side org derivation
+- ✅ B2B Developer API key lifecycle (create, list, revoke)
+- ✅ Razorpay webhook timing-safe HMAC-SHA256 signature verification
 
 ---
 
