@@ -22,6 +22,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+import anyio
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -43,6 +44,7 @@ from middleware.quota import (
     upgrade_org_plan,
     verify_org_access,
 )
+from models.schemas import AnalysisReport, ViolationItem
 from RAG.manager import rag_manager
 from SQL.db import get_pg_pool, get_sqlite_connection, init_sqlite_db
 from SQL.memory_consolidator import distill_and_store_facts
@@ -149,27 +151,6 @@ async def serve_dev_workbench():
 # Request / Response Schemas
 # --------------------------------------------------------------------------
 
-class ViolationItem(BaseModel):
-    clause_text: str = Field(..., description="The offending contractual clause")
-    violation_type: str = Field(..., description="payment_cycle | interest_penalty | tax_disallowance | dispute_resolution")
-    cited_law: str = Field(..., description="The specific Indian statute or section violated")
-    cited_chunk_id: Optional[str] = Field(None, description="RAG chunk reference identifier")
-    severity: str = Field("high", description="high | medium | low")
-    draft_counter_clause: str = Field(..., description="Legally sound substitute clause compliant with MSME Act")
-    samadhaan_ready: bool = Field(True, description="Whether this violation qualifies for MSME Samadhaan dispute filing")
-
-
-class AnalysisReport(BaseModel):
-    report_id: str
-    buyer_name: str
-    file_name: Optional[str] = "Contract Agreement"
-    compliance_score: int = Field(..., description="0-100 score where 100 is fully compliant")
-    violations: List[ViolationItem] = []
-    overall_summary: str
-    draft_samadhaan_complaint: Optional[str] = None
-    analyzed_at: str
-    disclaimer: str = "For informational and compliance guidance purposes only. Not formal legal advice."
-
 
 class AnalysePayload(BaseModel):
     message: Optional[str] = None
@@ -271,7 +252,7 @@ async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
 
     try:
         # Save user message to database
-        memory_repo.save_message(chat_id=chat_id, role="user", content=req.user_inp)
+        await anyio.to_thread.run_sync(memory_repo.save_message, chat_id, "user", req.user_inp)
 
         # Invoke LangGraph multi-agent workflow
         result = await graph.ainvoke(
@@ -292,7 +273,7 @@ async def chat_endpoint(req: ChatRequest, background_tasks: BackgroundTasks):
         context_used = result.get("context", "")
 
         # Save assistant output to database
-        memory_repo.save_message(chat_id=chat_id, role="assistant", content=output_text)
+        await anyio.to_thread.run_sync(memory_repo.save_message, chat_id, "assistant", output_text)
 
         # Background Task: Distill important facts into user_memories
         if req.user_id:
@@ -336,7 +317,7 @@ async def chat_stream_endpoint(req: ChatRequest, background_tasks: BackgroundTas
     chat_id = req.chat_id or str(uuid.uuid4())
     config = {"configurable": {"thread_id": chat_id}}
 
-    memory_repo.save_message(chat_id=chat_id, role="user", content=req.user_inp)
+    await anyio.to_thread.run_sync(memory_repo.save_message, chat_id, "user", req.user_inp)
 
     async def event_generator():
         full_output = ""
@@ -369,7 +350,7 @@ async def chat_stream_endpoint(req: ChatRequest, background_tasks: BackgroundTas
                         yield f"data: {json.dumps({'event': 'token', 'token': token})}\n\n"
 
             # Save completed response to DB
-            memory_repo.save_message(chat_id=chat_id, role="assistant", content=full_output)
+            await anyio.to_thread.run_sync(memory_repo.save_message, chat_id, "assistant", full_output)
 
             if req.user_id:
                 background_tasks.add_task(
@@ -403,8 +384,8 @@ async def ingest_file(file: UploadFile = File(...), user_id: Optional[str] = Non
         tmp_path = tmp.name
 
     try:
-        s3_res = s3_manager.upload_document(tmp_path, file.filename, user_id=user_id)
-        res = rag_manager.ingest(tmp_path, user_id=user_id)
+        s3_res = await anyio.to_thread.run_sync(s3_manager.upload_document, tmp_path, file.filename, user_id)
+        res = await anyio.to_thread.run_sync(rag_manager.ingest, tmp_path, user_id)
         return IngestResponse(
             status="success",
             chunks_added=res.get("chunks_added", 0),
@@ -530,16 +511,33 @@ async def analyse_contract(
             "of accepted goods. No interest shall accrue on delayed disbursements under any circumstances."
         )
 
-    # 3. Analyze Compliance Rules against Indian Statutes
+    # 3. Analyze Compliance Rules against Indian Statutes via Cedar Policy Engine
+    from Agents.fairness import fairness_node
+    parsed_clauses = [
+        {
+            "id": "clause_1",
+            "raw_text": contract_text,
+            "payment_days": 90 if ("90" in text_lower or "ninety" in text_lower) else (60 if "60" in text_lower else 30),
+            "has_penalty_interest": False if ("no interest" in text_lower or "without interest" in text_lower or "waive interest" in text_lower) else True,
+            "has_unilateral_cancellation": True if ("cancel" in text_lower or "unilateral" in text_lower or "without notice" in text_lower) else False,
+            "buyer_type": "large_enterprise",
+        }
+    ]
+    
+    fairness_res = await fairness_node({
+        "extracted_clauses": parsed_clauses,
+        "active_policy_pack": "msme_payment_terms",
+    })
+    cedar_violations = fairness_res.get("fairness_violations", [])
+
     violations: List[ViolationItem] = []
-    text_lower = contract_text.lower()
 
     # Rule 1: Section 15 of MSME Development Act 2006 (Payment period cap)
     has_90_days = "90" in text_lower or "ninety" in text_lower
     has_60_days = "60" in text_lower or "sixty" in text_lower
     has_120_days = "120" in text_lower or "one hundred twenty" in text_lower
 
-    if has_90_days or has_60_days or has_120_days or "exceeds" in text_lower or "net 90" in text_lower or "net 60" in text_lower:
+    if cedar_violations or has_90_days or has_60_days or has_120_days or "exceeds" in text_lower or "net 90" in text_lower or "net 60" in text_lower:
         days_mentioned = "90" if has_90_days else ("60" if has_60_days else "120")
         violations.append(
             ViolationItem(
@@ -564,6 +562,7 @@ async def analyse_contract(
         or "waive interest" in text_lower
         or "no penalty" in text_lower
         or "disbursements" in text_lower
+        or any("Rule 2" in r for v in cedar_violations for r in v.get("matched_rules", []))
     ):
         violations.append(
             ViolationItem(

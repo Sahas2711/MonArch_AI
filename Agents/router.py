@@ -63,6 +63,10 @@ async def orchestrator(state: State) -> dict:
             "user_memories": user_memories,
         }
 
+    if state.get("extracted_clauses") or "contract" in sanitized_input.lower() or "msme" in sanitized_input.lower() or "fairness" in sanitized_input.lower():
+        log.info("Direct Fairness/Contract route override triggered.")
+        return {"route": "fairness_agent", "user_inp": sanitized_input, "user_memories": user_memories}
+
     if state.get("image_data"):
         log.info("Direct Vision route override triggered (image payload attached).")
         return {"route": "vision_agent", "user_inp": sanitized_input, "user_memories": user_memories}
@@ -72,5 +76,5 @@ async def orchestrator(state: State) -> dict:
     return {"route": decision.agent, "user_inp": sanitized_input, "user_memories": user_memories}
 
 
-def route_next_node(state: State) -> Literal["planner", "research_agent", "rag_agent", "vision_agent"]:
+def route_next_node(state: State) -> Literal["planner", "research_agent", "rag_agent", "vision_agent", "fairness_agent", "action_agent"]:
     return state["route"]  # type: ignore[return-value]
