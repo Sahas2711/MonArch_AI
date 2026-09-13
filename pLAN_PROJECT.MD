@@ -1,286 +1,356 @@
-# Vasooli (Monarch/Wemboo fork) — Implementation Spec
-### For use with an AI code editor (Claude Code / Cursor). Paste sections as tasks, in order.
+# Wemboo Clause Guard - Winning Hackathon Roadmap
 
----
+## Product Thesis
 
-## Ground rules for the AI code editor
+**Wemboo Clause Guard** helps an Indian MSME supplier identify risky delayed-payment terms in a buyer contract, understand the evidence behind the finding, and prepare a safe next action.
 
-- Do not modify `Agents/graph.py`, `RAG/manager.py`, `RAG/retriever.py`, `guardrails/`, `storage/s3_manager.py`, or `audit/logger.py` except where a task below explicitly says to.
-- Every new agent node must follow the existing node signature pattern already used in `Agents/rag.py` / `Agents/research.py` (async function, takes and returns the shared `state` object defined in `Agents/state.py`).
-- Every new route must be wired through `RouteSwitch` in `Agents/router.py`, not called directly from `api.py`.
-- No blocking (synchronous, network, or file I/O) calls inside any `async def` — wrap with `anyio.to_thread.run_sync` if a library only offers a sync client.
-- Every new endpoint must derive `org_id`/`user_id` from the authenticated JWT context (`Depends(get_current_user)`), never from a request body/path/query param.
+The winning build is deliberately narrow. It is not a generic AI legal chatbot or a large SaaS suite. It is a trustworthy, AWS-native document workflow:
 
----
-
-## Task 1 — Add Cedar as the fairness policy engine
-
-**Goal:** a new `fairness.py` agent node that evaluates extracted contract clauses against codified MSME-law rules using Cedar, and returns structured, cited violations.
-
-### 1.1 Install and scaffold
-
-```bash
-pip install cedarpy  # Python bindings for Cedar policy evaluation
+```text
+Upload contract -> Extract facts -> Evaluate policy -> Explain evidence -> Draft next action
 ```
 
-Create directory:
-```
-policy_packs/
-  msme_payment_terms/
-    rules.cedar
-    schema.cedarschema
-    README.md
-```
+### One-line pitch
 
-### 1.2 Write the Cedar schema (`policy_packs/msme_payment_terms/schema.cedarschema`)
+"Upload a buyer contract; Wemboo identifies potential MSME delayed-payment risks using policy-as-code, shows the exact evidence, and drafts a grounded counter-clause for human review."
 
-```
-entity Clause {
-  paymentDays: Long,
-  hasPenaltyInterestClause: Bool,
-  hasUnilateralCancellation: Bool,
-  buyerType: String,   // "large_enterprise" | "msme"
-};
+### Problem and user
 
-entity Evaluation {};
+Indian MSME suppliers often accept buyer agreements containing long payment cycles, waived delayed-payment interest, or unilateral cancellation terms. They need a fast way to triage the agreement before signing or pursuing a payment recovery action.
 
-action "flag" appliesTo {
-  principal: [Evaluation],
-  resource: [Clause]
-};
-```
+**Primary user:** a small or medium supplier reviewing a purchase order, invoice, or service agreement.
 
-### 1.3 Write the policy rules (`policy_packs/msme_payment_terms/rules.cedar`)
+**User outcome:** a clear, evidence-backed report in minutes, not an unqualified legal conclusion.
 
-```
-// Rule 1: payment cycle exceeding the MSME Act 45-day limit
-permit (
-  principal,
-  action == Action::"flag",
-  resource
-) when {
-  resource.paymentDays > 45
-};
+## Eligibility and Submission Rules
 
-// Rule 2: missing statutory penalty-interest entitlement
-permit (
-  principal,
-  action == Action::"flag",
-  resource
-) when {
-  resource.hasPenaltyInterestClause == false
-};
+This repository is a reference only. The hackathon project must be built in a fresh public repository after the event begins. Do not submit this repository, rewrite its Git history, or portray prior work as event work.
 
-// Rule 3: one-sided cancellation terms
-permit (
-  principal,
-  action == Action::"flag",
-  resource
-) when {
-  resource.hasUnilateralCancellation == true
-};
-```
+Before the event, planning, architecture practice, service tutorials, and team preparation are allowed. During the event:
 
-Each `permit` that evaluates true = one violation. Keep one rule per file section so you can label *which* rule fired in the output (needed for the `cited_law` field below).
+- Create a new repository and make the first commit after the clock starts.
+- Build the feature being judged during the event window.
+- Credit libraries, public APIs, templates, and AI coding tools used.
+- Submit a public repository, deployed URL, three-minute video, and short writeup before the deadline.
+- Record the real deployed system. A capability not shown in the video does not count.
 
-### 1.4 Build the Policy Pack loader interface
+## Success Criteria
 
-**New file: `policy_packs/loader.py`**
+The project is ready for submission only when all of the following are true:
 
-```python
-from dataclasses import dataclass
-from pathlib import Path
+- A real PDF or image uploads from a fresh browser session.
+- The file is stored in a private, tenant-scoped S3 location.
+- Amazon Textract extracts text from that uploaded file.
+- The backend stores normalized facts, source page, and extraction confidence.
+- Cedar evaluates deterministic policy rules and exposes the policy ID/version that fired.
+- Amazon Bedrock receives only saved evidence and policy findings, then drafts an informational counter-clause or checklist.
+- Cognito identity determines tenant access; the client never supplies a trusted tenant ID.
+- A second signed-in user cannot retrieve the first user's report or document.
+- A compliant sample and a risky sample both produce correct results.
+- The deployed URL, test suite, and demo workflow work without a simulated fallback.
 
-@dataclass
-class PolicyPack:
-    name: str
-    policy_dir: Path
-    corpus_dir: Path          # legal reference text for RAG grounding
-    action_template: str      # prompt template for the action/drafting agent
+## Scope Boundary
 
-    @classmethod
-    def load(cls, name: str) -> "PolicyPack":
-        base = Path("policy_packs") / name
-        return cls(
-            name=name,
-            policy_dir=base,
-            corpus_dir=base / "corpus",
-            action_template=(base / "action_template.txt").read_text(),
-        )
+### Build
+
+1. Authenticated upload of a contract PDF/image.
+2. Asynchronous document processing status.
+3. Extracted-clause evidence view with page number and confidence.
+4. Three deterministic MSME-risk rules evaluated by Cedar.
+5. Grounded Bedrock explanation and proposed counter-clause.
+6. Secure report retrieval and a simple downloadable evidence report.
+7. Deployed AWS architecture, test evidence, and a focused demo.
+
+### Explicitly do not build
+
+- Billing, pricing, Razorpay, subscriptions, or API-key management.
+- Generic chat, RAG memory, generic multi-agent orchestration, or ERP connectors.
+- Automatic legal filing, exact interest calculations, or claims of legal advice.
+- More policy domains than payment terms.
+- Any mocked result that appears to be a real analysis.
+
+If a feature cannot be shown working in the recorded video, remove it from navigation and the writeup.
+
+## Target Architecture
+
+```mermaid
+flowchart LR
+    U[MSME supplier] --> F[Amplify hosted web app]
+    F --> C[Amazon Cognito]
+    F --> G[API Gateway]
+    G --> L1[Upload API Lambda]
+    L1 --> S3[(Private S3 document bucket)]
+    L1 --> D1[(DynamoDB report state)]
+    S3 --> E[EventBridge]
+    E --> SF[AWS Step Functions]
+    SF --> T[Amazon Textract]
+    SF --> N[Normalize clauses Lambda]
+    N --> P[Cedar policy evaluator Lambda]
+    P --> B[Amazon Bedrock explanation Lambda]
+    B --> D2[(DynamoDB report and evidence)]
+    F --> G
+    G --> L2[Report API Lambda]
+    L2 --> D2
 ```
 
-This is what makes the fairness engine swappable per domain later (rental agreements, tax docs, etc.) without touching node code — only add a new folder.
+### Component responsibilities
 
-### 1.5 Build the fairness agent node
+| Component | Responsibility | Why it belongs in the build |
+| --- | --- | --- |
+| Amplify Hosting | Serve the web app | Live URL and simple frontend deployment |
+| Cognito | Authenticate users | Real identity and tenant boundary |
+| API Gateway + Lambda | Issue upload URL, start workflow, return reports | Small, serverless API surface |
+| S3 | Store original documents privately | Durable document storage with tenant prefix isolation |
+| EventBridge + Step Functions | Coordinate asynchronous processing | Visible, reliable orchestration for the demo |
+| Textract | Extract document text and structure | Real value from uploaded PDF/image |
+| Cedar | Evaluate deterministic rules | Versioned, explainable policy decisions |
+| Bedrock | Explain findings and draft next action | Grounded natural-language value |
+| DynamoDB | Store report, evidence, status, audit events | Low-ops report retrieval and audit trail |
+| CloudWatch | Logs, traces, and operational evidence | Makes the architecture demonstrably real |
 
-**New file: `Agents/fairness.py`**
+### Security model
 
-```python
-from cedarpy import AuthzResult, is_authorized  # verify exact API against cedarpy docs
-from policy_packs.loader import PolicyPack
-from Agents.state import AgentState
-from utils.logger import log
+- Use the Cognito `sub` claim as the tenant key.
+- Store uploads only at `private/<sub>/<document_id>/original.<ext>`.
+- Generate short-lived presigned upload URLs only for that prefix.
+- Use IAM least-privilege policies: each Lambda receives only the actions and resources it needs.
+- Query reports by both `tenant_id` and `report_id`; never look up a report by ID alone.
+- Keep the S3 bucket private, encrypted, and without public ACLs.
+- Do not log raw contracts or personal identifiers in application logs.
+- Add a simple retention setting and document the deletion behavior.
+- Do not ship a development admin fallback, default secret, unsigned JWT acceptance, or wildcard CORS with credentials.
 
-async def fairness_node(state: AgentState) -> AgentState:
-    """
-    Evaluates extracted clause fields against the active Policy Pack's
-    Cedar rules. Runs once per extracted clause. Cedar evaluation is
-    synchronous/CPU-bound and fast (no network I/O) — safe to call
-    directly inside async def without a thread-pool wrapper, but
-    confirm this against cedarpy's actual implementation before shipping.
-    """
-    pack = PolicyPack.load(state.active_policy_pack or "msme_payment_terms")
-    violations = []
+## Data Model
 
-    for clause in state.extracted_clauses:
-        entity = {
-            "paymentDays": clause.payment_days,
-            "hasPenaltyInterestClause": clause.has_penalty_interest,
-            "hasUnilateralCancellation": clause.has_unilateral_cancellation,
-            "buyerType": clause.buyer_type,
-        }
-        result: AuthzResult = is_authorized(
-            policy_dir=pack.policy_dir, action="flag", resource=entity
-        )
-        if result.decision == "Allow":  # a rule fired → flag this clause
-            violations.append({
-                "clause_text": clause.raw_text,
-                "matched_rules": result.reasons,  # which rule(s) fired
-                "clause_id": clause.id,
-            })
+Use one DynamoDB table for hackathon simplicity.
 
-    state.fairness_violations = violations
-    log.info("Fairness node flagged %d violations", len(violations))
-    return state
+```text
+PK = TENANT#<cognito-sub>
+SK = DOCUMENT#<document-id>
+     REPORT#<report-id>
+     EVENT#<timestamp>#<event-id>
 ```
 
-**Wire into the graph:** in `Agents/router.py`, add a route in `RouteSwitch` for document-type `"contract"` → `fairness_node`, following the existing pattern used for `RAGNode`/`VisionNode`. Do not change how `RouteSwitch` itself decides routes — only add the new branch.
+### Report record
 
-### 1.6 Tests (required before merging)
-
-**New file: `tests/test_fairness_agent.py`** — one test per Cedar rule:
-```python
-async def test_flags_payment_cycle_over_45_days(): ...
-async def test_flags_missing_penalty_clause(): ...
-async def test_flags_unilateral_cancellation(): ...
-async def test_does_not_flag_compliant_clause(): ...  # false-positive check
-```
-
----
-
-## Task 2 — Add Strands Agents SDK for one node (not a full rewrite)
-
-**Goal:** add genuine "built with AWS's own agent framework" credit without destabilizing the working LangGraph pipeline. Port **only the fairness/action drafting step**, since it's new code anyway (lower regression risk than porting a working node).
-
-### 2.1 Install
-
-```bash
-pip install strands-agents
-```
-
-### 2.2 Scope decision (do not deviate from this)
-
-- **Keep:** router, planner, research, RAG, vision, reflection nodes exactly as-is on LangGraph.
-- **Port to Strands:** the action/drafting agent only (`Agents/action.py`, net-new in Task 3) — it has no existing working version to regress, and it's a bounded, single-purpose agent (input: violation list → output: drafted letter), which is exactly the shape Strands is designed for.
-- **Do not** attempt to replace the router or reflection loop with Strands mid-hackathon — that is a rewrite of working infrastructure under time pressure, which is the single highest-risk move available to you this week.
-
-### 2.3 Wrap the Strands agent so LangGraph can still call it as a normal node
-
-**New file: `Agents/action.py`**
-
-```python
-from strands import Agent, tool
-from Agents.state import AgentState
-
-@tool
-def draft_samadhaan_complaint(violation: dict, cited_law: str) -> str:
-    """Strands tool: drafts a Samadhaan-portal-ready complaint paragraph."""
-    ...
-
-strands_action_agent = Agent(
-    tools=[draft_samadhaan_complaint],
-    model="bedrock/claude",   # confirm exact Bedrock model id string against Strands docs
-)
-
-async def action_node(state: AgentState) -> AgentState:
-    """
-    LangGraph-compatible wrapper around a Strands agent.
-    Keeps the node signature identical to every other node in Agents/,
-    so router.py and graph.py need zero changes to call it.
-    """
-    drafts = []
-    for violation in state.fairness_violations:
-        result = await strands_action_agent.invoke_async(
-            f"Draft a Samadhaan complaint for: {violation}"
-        )
-        drafts.append(result)
-    state.action_drafts = drafts
-    return state
-```
-
-This pattern — Strands agent internally, plain async function externally — means the rest of your LangGraph graph never knows Strands exists. If Strands integration has issues under time pressure, you can swap `action_node`'s internals back to a direct Bedrock call without touching `router.py` or `graph.py` at all.
-
-### 2.4 Fallback plan (write this now, not during a Day-3 panic)
-
-If Strands integration breaks or eats too much time: keep `action_node`'s function signature, replace its body with a direct `bedrock_client.invoke_model(...)` call. Nothing else in the graph changes. Budget max 3–4 hours on Strands before falling back — this is a "nice to have AWS-native credit" item, not core functionality.
-
----
-
-## Task 3 — Consolidated technical improvements (from prior review passes)
-
-Execute in this order; each is independent and can be skipped without breaking the others if time runs out.
-
-### 3.1 Bedrock as primary LLM path (not fallback)
-- In `utils/config.py`: make Bedrock the default client; Groq becomes the explicit fallback (`if not BEDROCK_AVAILABLE: use_groq()`), never the reverse.
-- Confirm this by grepping the codebase for the actual hot-path client call before the demo — the fix must be true in the code that runs, not just in the config comment.
-
-### 3.2 Swap Postgres/Aurora → DynamoDB for SaaS tables
-- Tables: `organizations`, `org_members`, `usage_events`, `api_keys`, `plan_limits`.
-- Use single-table or per-entity design with PK `org_id`, SK pattern for `usage_events` (`SK = "USAGE#<ISO timestamp>"`) so month-range queries are a native sort-key condition, no expression indexes needed.
-- Delete the Postgres-specific `date_trunc` index workaround entirely — it's not needed with this design.
-
-### 3.3 Fix the quota key-mapping bug (if not already fixed)
-```python
-EVENT_TYPE_TO_LIMIT_KEY = {
-    "analysis": "analyses", "document": "documents", "chat": "chat_messages",
+```json
+{
+  "tenant_id": "Cognito sub",
+  "report_id": "uuid",
+  "document_id": "uuid",
+  "status": "COMPLETE",
+  "created_at": "ISO-8601",
+  "policy_pack": "msme-payment-v1",
+  "findings": [
+    {
+      "policy_id": "PAYMENT_TERM_OVER_45_DAYS",
+      "decision": "FLAGGED",
+      "source_text": "Payment shall be made in 90 days...",
+      "page": 2,
+      "confidence": 98.2,
+      "normalized_facts": {"payment_days": 90},
+      "needs_human_review": false
+    }
+  ],
+  "grounded_guidance": {
+    "summary": "...",
+    "counter_clause": "...",
+    "limitations": "Informational guidance only; verify eligibility and facts."
+  }
 }
 ```
-Never derive the plan-limit key via string concatenation (`event_type + "s"`) — verify this explicitly in code review, not just by reading a comment claiming it's fixed.
 
-### 3.4 Fix org-scoped endpoint IDOR
-- `GET /api/org/{org_id}`, `/usage`, `/history`, `POST /invite` must call a real `verify_org_access(user, org_id, required_role=None)` function that:
-  1. Looks up the caller's actual membership row for `org_id`.
-  2. Raises 403 if no membership exists.
-  3. For `/invite` specifically, also checks `role in ("admin", "owner")`.
-- Write this function and show its body — do not mark this task complete based on a route comment alone.
+## Policy Design
 
-### 3.5 Fix blocking synchronous calls inside async endpoints
-- Audit every `async def` for a synchronous SDK call (Razorpay's `client.order.create`, any raw `sqlite3`/`psycopg2` call, `requests.get`, etc.).
-- Wrap each with `await anyio.to_thread.run_sync(fn, *args)`.
+Start with three rules. Each must be deterministic, individually tested, and explainable.
 
-### 3.6 Structured output schema everywhere
-- `ViolationItem` / `AnalysisReport` Pydantic models (already specified) become the return type of every fairness/action node — no free-text LLM output reaches the API response layer unvalidated.
+| Policy ID | Normalized input | Trigger | User-facing result |
+| --- | --- | --- | --- |
+| `PAYMENT_TERM_OVER_45_DAYS` | `payment_days` | Greater than 45 | Potential delayed-payment compliance risk |
+| `STATUTORY_INTEREST_WAIVER` | `interest_waived` | `true` | Potential risk from excluding delayed-payment interest |
+| `UNILATERAL_TERMINATION` | `unilateral_termination` | `true` | One-sided termination term requiring review |
 
-### 3.7 Textract structured extraction, not generic OCR
-- Use `AnalyzeExpense` for bills/invoices, `AnalyzeDocument` with `FORMS`+`TABLES` for contracts/POs — replaces or supplements `pytesseract` for structured line-item fields the Cedar rules need (`paymentDays`, etc.).
+### Policy rules of engagement
 
-### 3.8 Step Functions + EventBridge wiring
-- S3 upload → EventBridge rule → Step Functions execution → invokes the Lambda/App Runner endpoint that runs the LangGraph pipeline.
-- Deliverable: a Step Functions state-machine diagram screenshot for the demo video/README.
+- Display the original extracted text for each finding.
+- Preserve page number, extraction confidence, and policy version.
+- Mark low-confidence extraction or ambiguous wording as `NEEDS_REVIEW`.
+- Do not flag a clause because it contains a vague keyword such as `disbursement`.
+- Do not call a clause illegal, void, enforceable, or legally decisive.
+- State that the result is informational and depends on facts such as supplier eligibility, buyer relationship, and agreement context.
 
-### 3.9 Bedrock Guardrails as a second safety layer
-- Add alongside (not instead of) `guardrails/output_guard.py` — apply to the action agent's drafted output specifically, since fabricated legal citations are the highest-severity failure mode.
+## Bedrock Grounding Contract
 
-### 3.10 Real test coverage number
-- Run `pytest tests/ --cov=. --cov-report=term-missing` and put the actual percentage in the README — replace any "target" language.
+Bedrock is an explanation layer, not the decision engine.
 
----
+### Allowed input
 
-## Execution order recommendation (if time-constrained)
+- Exact extracted clause text.
+- Page number and confidence.
+- Cedar policy ID, decision, and normalized facts.
+- Approved static statutory reference snippets.
 
-1. Task 1 (Cedar) — this is your core differentiator, do not skip or truncate
-2. 3.1, 3.3, 3.4, 3.5 — correctness/security fixes, cheap and high-consequence if skipped
-3. 3.7 (Textract structured extraction) — directly feeds Cedar's input fields, do before Task 1 testing
-4. 3.2 (DynamoDB) — do only if Postgres is already causing friction; otherwise lower priority than it looks
-5. Task 2 (Strands) — do last, time-boxed, with the fallback plan pre-written
-6. 3.8, 3.9, 3.10 — do if Day 4 morning has slack; otherwise state as "roadmap" in the pitch, not as done
+### Required structured output
+
+```json
+{
+  "summary": "Plain-language explanation based only on supplied evidence.",
+  "counter_clause": "A proposed contractual clause for review.",
+  "next_steps": ["Verify MSME eligibility", "Discuss proposed wording"],
+  "limitations": "Informational guidance only; consult a qualified professional."
+}
+```
+
+### Guardrails
+
+- Reject output that adds a fact not present in the input evidence.
+- Never fabricate a case citation, government filing number, interest amount, or legal outcome.
+- Always include the limitations statement.
+- If evidence is insufficient, output `needs_human_review` instead of a confident conclusion.
+
+## Event Delivery Plan
+
+### Before the event: learn and prepare, do not build the entry
+
+- Read the hackathon rules and verify the exact start/deadline.
+- Create an AWS Builder Center profile and obtain the credits/sandbox needed for Ship It.
+- Practice independently with Cognito, S3 presigned URLs, Textract, Step Functions, Cedar, Bedrock, DynamoDB, and Amplify.
+- Draft architecture, user story, acceptance criteria, sample document text, and demo script.
+- Assign team responsibilities and agree on one decision-maker for scope cuts.
+- Prepare a list of third-party assets and tools to disclose in the writeup.
+
+### Day 1: establish a deployed vertical slice
+
+**Outcome:** A signed-in user uploads a file and sees a real processing state.
+
+- Create the new public repository after the event begins.
+- Add a concise README with the problem, architecture, and build log.
+- Deploy Cognito, S3, API Gateway, Lambda, DynamoDB, and Amplify.
+- Implement sign-in and tenant-scoped presigned upload URL issuance.
+- Store a `PROCESSING` report record in DynamoDB.
+- Trigger a Step Functions workflow when the upload completes.
+- Add CloudWatch logs with correlation IDs, without raw document text.
+
+**Day 1 exit gate:** A fresh user can upload one real file at the deployed URL, and the object appears in the correct S3 prefix.
+
+### Day 2: make extraction and policy decisions real
+
+**Outcome:** The system identifies one compliant and one risky payment clause correctly.
+
+- Add asynchronous Textract processing to the state machine.
+- Build a normalizer that extracts candidate payment terms with source page/confidence.
+- Implement the three Cedar rules and policy-version field.
+- Store raw evidence, normalized facts, and policy results in DynamoDB.
+- Build the report view: original clause, confidence, finding, and policy label.
+- Write unit tests for every policy and boundary condition.
+
+**Day 2 exit gate:** A 90-day/no-interest sample is flagged; a clear 30-day payment sample is not flagged.
+
+### Day 3: turn evidence into action
+
+**Outcome:** A user receives grounded, useful guidance without false legal certainty.
+
+- Add Bedrock structured generation after Cedar evaluation.
+- Enforce the grounding contract and limitations message.
+- Display a counter-clause and next-step checklist beside the evidence.
+- Add an HTML/JSON evidence report download only if it is stable.
+- Add deletion for the current user's document/report.
+- Test cross-tenant denial with two distinct Cognito users.
+
+**Day 3 exit gate:** The same report is useful to a user, explainable to a judge, and inaccessible to another user.
+
+### Day 4: harden, record, submit
+
+**Outcome:** A reproducible demonstration and on-time submission.
+
+- Execute the full workflow repeatedly from clean browser sessions.
+- Fix defects before adding polish.
+- Run the test suite and capture results.
+- Verify IAM, private bucket access, missing-secret behavior, and error states.
+- Record a first acceptable three-minute video early.
+- Submit repository, URL, video, and writeup before the deadline.
+- Improve visuals only after the submission is safely complete.
+
+**Day 4 exit gate:** Every claim in the README and video is visible in the deployed application or AWS console.
+
+## Test Plan
+
+### Unit tests
+
+- Payment days: 30, 45, 46, 60, and 90 days.
+- Interest language: statutory language, explicit waiver, unrelated mention of interest, and absent term.
+- Termination language: bilateral vs unilateral.
+- Normalizer behavior for numeric and word forms such as `ninety days`.
+- Low-confidence and missing extraction handling.
+- Bedrock output schema validation and unsupported-fact rejection.
+
+### Integration tests
+
+- Authenticated user gets an upload URL only for their tenant prefix.
+- S3 upload triggers one state-machine execution.
+- A completed Textract result produces a report record.
+- Report lookup succeeds for the owner and returns `403`/`404` for another user.
+- Bad files, failed Textract jobs, failed Bedrock calls, and timeouts produce useful status without simulated findings.
+
+### Demo fixtures
+
+Create fixtures during the event and label them as synthetic:
+
+1. Compliant 30-day payment clause.
+2. Risky 90-day payment clause with interest waiver.
+3. Ambiguous low-confidence scan that becomes `NEEDS_REVIEW`.
+
+## Three-Minute Demo Script
+
+| Time | What judges see | Point being proven |
+| --- | --- | --- |
+| 0:00-0:20 | Delayed-payment problem and target user | Real impact |
+| 0:20-0:50 | Sign in and upload a real synthetic contract | Working product, Cognito, S3 |
+| 0:50-1:20 | Processing state then extracted source clause | Textract and orchestration |
+| 1:20-1:55 | Cedar policy ID, evidence, confidence, and decision | Deterministic explainability |
+| 1:55-2:25 | Grounded Bedrock counter-clause and limitations | Useful AI, safely constrained |
+| 2:25-2:45 | Deployed architecture plus Step Functions/DynamoDB/CloudWatch | AWS is essential, not decorative |
+| 2:45-3:00 | What the team learned and next-step impact | Learning and realistic vision |
+
+Do not show a mocked result, a broken upload, placeholder dashboard data, or services that are not actually deployed.
+
+## Judge Questions and Answers
+
+### Why Cedar instead of asking an LLM to decide?
+
+Cedar makes the policy decision deterministic, testable, versioned, and auditable. Bedrock explains the result; it does not decide the rule outcome.
+
+### How do you prevent hallucinated legal advice?
+
+The model receives only extracted evidence, normalized facts, policy findings, and approved reference snippets. Its output is structured, validated, and labeled as informational guidance rather than legal advice.
+
+### How do you protect confidential contracts?
+
+Cognito determines the tenant, S3 objects use tenant-scoped private prefixes, APIs authorize every report read, DynamoDB queries are tenant-scoped, and the system does not expose public document URLs.
+
+### What happens when OCR confidence is poor?
+
+The system surfaces the text and confidence but marks the result as requiring human review. It does not create a confident compliance finding from unreliable extraction.
+
+### What did the team learn during the event?
+
+Name concrete outcomes: asynchronous workflow design with Step Functions, document extraction with Textract, policy-as-code with Cedar, grounded generation with Bedrock, and least-privilege tenant isolation on AWS.
+
+## Submission Checklist
+
+- [ ] New repository created after the event begins.
+- [ ] Repository history clearly shows event-window work.
+- [ ] README includes architecture, AWS services, limitations, and AI-tool disclosure.
+- [ ] Deployed URL works from an incognito browser session.
+- [ ] Video is under three minutes and shows the real deployed flow.
+- [ ] All architecture claims are visible in code, deployment, or video.
+- [ ] Core tests pass.
+- [ ] No secrets, credentials, `.env`, local database, or private documents are committed.
+- [ ] Upload, policy evaluation, Bedrock explanation, and tenant isolation were rechecked before submission.
+- [ ] Submission was sent early enough to recover from upload/platform failure.
+
+## Definition of Winning
+
+The project is winning when a judge can state, without reading the code:
+
+"This solves a real MSME problem. The team built a live AWS workflow. The contract evidence, rule decision, and AI explanation are clearly separated. It works, it respects uncertainty, and it can plausibly help a supplier tomorrow."
