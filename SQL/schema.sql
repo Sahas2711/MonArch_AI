@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS analyses_history (
     compliance_score   INTEGER NOT NULL,
     violations_count   INTEGER NOT NULL DEFAULT 0,
     report_data        JSONB NOT NULL,
+    contact_attempts   INTEGER NOT NULL DEFAULT 0,
+    first_contact_date TIMESTAMPTZ,
     created_at         TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_analyses_org ON analyses_history (org_id, created_at DESC);

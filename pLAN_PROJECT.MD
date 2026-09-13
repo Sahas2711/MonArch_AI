@@ -1,356 +1,355 @@
-# Wemboo Clause Guard - Winning Hackathon Roadmap
+Add 5 "Smoothness B" Features to Vasooli/Wemboo
+Goal: Add Risk Score, Decision Recommendation, Evidence Panel improvements, Financial Impact Calculator, and Negotiation Recommendation — all built from existing data/logic, no new infrastructure or models.
 
-## Product Thesis
+Proposed Changes
+Component 1 — Risk Score (Rule-Based)
+Replaces the current opaque weighted scorer with a transparent, defensible deduction model that labels itself correctly.
 
-**Wemboo Clause Guard** helps an Indian MSME supplier identify risky delayed-payment terms in a buyer contract, understand the evidence behind the finding, and prepare a safe next action.
+[MODIFY] 
+scorer.py
+Current state: ComplianceScorer.calculate_score() uses WEIGHTS dict (payment_cycle=35, interest_penalty=30, tax_disallowance=20, unilateral_cancellation=15) and simple interest math. The weights silently sum to 100 and there's no per-deduction rationale or evidence confidence factor.
 
-The winning build is deliberately narrow. It is not a generic AI legal chatbot or a large SaaS suite. It is a trustworthy, AWS-native document workflow:
+Changes:
 
-```text
-Upload contract -> Extract facts -> Evaluate policy -> Explain evidence -> Draft next action
-```
+Replace WEIGHTS with a new RISK_DEDUCTIONS dict matching the user's spec:
+python
 
-### One-line pitch
-
-"Upload a buyer contract; Wemboo identifies potential MSME delayed-payment risks using policy-as-code, shows the exact evidence, and drafts a grounded counter-clause for human review."
-
-### Problem and user
-
-Indian MSME suppliers often accept buyer agreements containing long payment cycles, waived delayed-payment interest, or unilateral cancellation terms. They need a fast way to triage the agreement before signing or pursuing a payment recovery action.
-
-**Primary user:** a small or medium supplier reviewing a purchase order, invoice, or service agreement.
-
-**User outcome:** a clear, evidence-backed report in minutes, not an unqualified legal conclusion.
-
-## Eligibility and Submission Rules
-
-This repository is a reference only. The hackathon project must be built in a fresh public repository after the event begins. Do not submit this repository, rewrite its Git history, or portray prior work as event work.
-
-Before the event, planning, architecture practice, service tutorials, and team preparation are allowed. During the event:
-
-- Create a new repository and make the first commit after the clock starts.
-- Build the feature being judged during the event window.
-- Credit libraries, public APIs, templates, and AI coding tools used.
-- Submit a public repository, deployed URL, three-minute video, and short writeup before the deadline.
-- Record the real deployed system. A capability not shown in the video does not count.
-
-## Success Criteria
-
-The project is ready for submission only when all of the following are true:
-
-- A real PDF or image uploads from a fresh browser session.
-- The file is stored in a private, tenant-scoped S3 location.
-- Amazon Textract extracts text from that uploaded file.
-- The backend stores normalized facts, source page, and extraction confidence.
-- Cedar evaluates deterministic policy rules and exposes the policy ID/version that fired.
-- Amazon Bedrock receives only saved evidence and policy findings, then drafts an informational counter-clause or checklist.
-- Cognito identity determines tenant access; the client never supplies a trusted tenant ID.
-- A second signed-in user cannot retrieve the first user's report or document.
-- A compliant sample and a risky sample both produce correct results.
-- The deployed URL, test suite, and demo workflow work without a simulated fallback.
-
-## Scope Boundary
-
-### Build
-
-1. Authenticated upload of a contract PDF/image.
-2. Asynchronous document processing status.
-3. Extracted-clause evidence view with page number and confidence.
-4. Three deterministic MSME-risk rules evaluated by Cedar.
-5. Grounded Bedrock explanation and proposed counter-clause.
-6. Secure report retrieval and a simple downloadable evidence report.
-7. Deployed AWS architecture, test evidence, and a focused demo.
-
-### Explicitly do not build
-
-- Billing, pricing, Razorpay, subscriptions, or API-key management.
-- Generic chat, RAG memory, generic multi-agent orchestration, or ERP connectors.
-- Automatic legal filing, exact interest calculations, or claims of legal advice.
-- More policy domains than payment terms.
-- Any mocked result that appears to be a real analysis.
-
-If a feature cannot be shown working in the recorded video, remove it from navigation and the writeup.
-
-## Target Architecture
-
-```mermaid
-flowchart LR
-    U[MSME supplier] --> F[Amplify hosted web app]
-    F --> C[Amazon Cognito]
-    F --> G[API Gateway]
-    G --> L1[Upload API Lambda]
-    L1 --> S3[(Private S3 document bucket)]
-    L1 --> D1[(DynamoDB report state)]
-    S3 --> E[EventBridge]
-    E --> SF[AWS Step Functions]
-    SF --> T[Amazon Textract]
-    SF --> N[Normalize clauses Lambda]
-    N --> P[Cedar policy evaluator Lambda]
-    P --> B[Amazon Bedrock explanation Lambda]
-    B --> D2[(DynamoDB report and evidence)]
-    F --> G
-    G --> L2[Report API Lambda]
-    L2 --> D2
-```
-
-### Component responsibilities
-
-| Component | Responsibility | Why it belongs in the build |
-| --- | --- | --- |
-| Amplify Hosting | Serve the web app | Live URL and simple frontend deployment |
-| Cognito | Authenticate users | Real identity and tenant boundary |
-| API Gateway + Lambda | Issue upload URL, start workflow, return reports | Small, serverless API surface |
-| S3 | Store original documents privately | Durable document storage with tenant prefix isolation |
-| EventBridge + Step Functions | Coordinate asynchronous processing | Visible, reliable orchestration for the demo |
-| Textract | Extract document text and structure | Real value from uploaded PDF/image |
-| Cedar | Evaluate deterministic rules | Versioned, explainable policy decisions |
-| Bedrock | Explain findings and draft next action | Grounded natural-language value |
-| DynamoDB | Store report, evidence, status, audit events | Low-ops report retrieval and audit trail |
-| CloudWatch | Logs, traces, and operational evidence | Makes the architecture demonstrably real |
-
-### Security model
-
-- Use the Cognito `sub` claim as the tenant key.
-- Store uploads only at `private/<sub>/<document_id>/original.<ext>`.
-- Generate short-lived presigned upload URLs only for that prefix.
-- Use IAM least-privilege policies: each Lambda receives only the actions and resources it needs.
-- Query reports by both `tenant_id` and `report_id`; never look up a report by ID alone.
-- Keep the S3 bucket private, encrypted, and without public ACLs.
-- Do not log raw contracts or personal identifiers in application logs.
-- Add a simple retention setting and document the deletion behavior.
-- Do not ship a development admin fallback, default secret, unsigned JWT acceptance, or wildcard CORS with credentials.
-
-## Data Model
-
-Use one DynamoDB table for hackathon simplicity.
-
-```text
-PK = TENANT#<cognito-sub>
-SK = DOCUMENT#<document-id>
-     REPORT#<report-id>
-     EVENT#<timestamp>#<event-id>
-```
-
-### Report record
-
-```json
-{
-  "tenant_id": "Cognito sub",
-  "report_id": "uuid",
-  "document_id": "uuid",
-  "status": "COMPLETE",
-  "created_at": "ISO-8601",
-  "policy_pack": "msme-payment-v1",
-  "findings": [
-    {
-      "policy_id": "PAYMENT_TERM_OVER_45_DAYS",
-      "decision": "FLAGGED",
-      "source_text": "Payment shall be made in 90 days...",
-      "page": 2,
-      "confidence": 98.2,
-      "normalized_facts": {"payment_days": 90},
-      "needs_human_review": false
-    }
-  ],
-  "grounded_guidance": {
-    "summary": "...",
-    "counter_clause": "...",
-    "limitations": "Informational guidance only; verify eligibility and facts."
-  }
+RISK_DEDUCTIONS = {
+    "payment_days_breach":        (35, "Payment-term breach is weighted highest because it's the statute's core protection"),
+    "no_penalty_interest_clause":  (20, "Missing penalty interest removes the statutory deterrent against delayed payments"),
+    "unilateral_cancellation":     (15, "One-sided cancellation exposes the MSME to uncompensated losses"),
+    "low_evidence_confidence":     (10, "Low extraction confidence means the determination may be unreliable"),
 }
-```
+Add a new RiskScoreBreakdown Pydantic model with deduction_name, points_deducted, rationale, triggered fields.
+Rework calculate_score() to:
+Start at 100
+Deduct 35 if payment_days > 45
+Deduct 20 if no_penalty_interest_clause (any clause has has_penalty_interest == False)
+Deduct 15 if unilateral_cancellation detected
+Deduct 10 if average extraction confidence < 0.7
+max(score, 0)
+Return full breakdown list (which deductions fired and which didn't)
+Map score to color band: ≥70 → green/low, 40–69 → amber/medium, <40 → red/high-critical
+Keep existing ComplianceScore model but add breakdown_items: List[RiskScoreBreakdown] and score_disclaimer: str (hardcoded to "Calculated from flagged statutory violations — not a probability estimate.")
+Rename score field description from "Overall compliance score" to "Compliance Risk Score (Rule-Based Risk Index)"
+[MODIFY] 
+schemas.py
+Add to AnalysisReport:
 
-## Policy Design
+python
 
-Start with three rules. Each must be deterministic, individually tested, and explainable.
+risk_score_breakdown: Optional[List[dict]] = Field(None, description="Per-deduction breakdown of the Compliance Risk Score")
+risk_score_disclaimer: str = Field(
+    "Calculated from flagged statutory violations — not a probability estimate.",
+    description="Mandatory labeling disclaimer for the risk score"
+)
+[MODIFY] 
+api.py
+ — analyse_contract endpoint (~line 695–710)
+After scorer.calculate_score(), propagate the new breakdown_items and score_disclaimer into the AnalysisReport constructor.
 
-| Policy ID | Normalized input | Trigger | User-facing result |
-| --- | --- | --- | --- |
-| `PAYMENT_TERM_OVER_45_DAYS` | `payment_days` | Greater than 45 | Potential delayed-payment compliance risk |
-| `STATUTORY_INTEREST_WAIVER` | `interest_waived` | `true` | Potential risk from excluding delayed-payment interest |
-| `UNILATERAL_TERMINATION` | `unilateral_termination` | `true` | One-sided termination term requiring review |
+Component 2 — Decision Recommendation (A/B/C Ladder)
+A fixed if/elif decision tree, not a model. Needs only two new fields on the case record: contact_attempts and first_contact_date.
 
-### Policy rules of engagement
+[NEW] 
+recommender.py
+New module with:
 
-- Display the original extracted text for each finding.
-- Preserve page number, extraction confidence, and policy version.
-- Mark low-confidence extraction or ambiguous wording as `NEEDS_REVIEW`.
-- Do not flag a clause because it contains a vague keyword such as `disbursement`.
-- Do not call a clause illegal, void, enforceable, or legally decisive.
-- State that the result is informational and depends on facts such as supplier eligibility, buyer relationship, and agreement context.
+python
 
-## Bedrock Grounding Contract
+@dataclass
+class RecommendedAction:
+    action_id: str          # "send_demand" | "formal_notice" | "file_samadhaan"
+    label: str              # "Send Payment Demand" | "Formal Legal Notice" | "File MSEFC/Samadhaan Complaint"
+    effort_level: str       # "low" | "medium" | "high"
+    is_recommended: bool
+    reason: str             # "Recommended because no prior contact has been made."
+    escalation_order: int   # 1, 2, 3
+class DecisionRecommender:
+    def recommend(self, has_violations: bool, contact_attempts: int,
+                  first_contact_date: Optional[date], current_date: Optional[date] = None
+    ) -> List[RecommendedAction]:
+Logic (exactly as user specified):
 
-Bedrock is an explanation layer, not the decision engine.
+contact_attempts == 0 → recommend "Send Payment Demand"
+contact_attempts > 0 and days_since_first_contact < 30 → recommend "Formal Legal Notice"
+contact_attempts > 0 and days_since_first_contact >= 30 → recommend "File MSEFC/Samadhaan Complaint"
+Always returns all 3 options with is_recommended=True on exactly one.
 
-### Allowed input
+[MODIFY] 
+schemas.py
+Add new schemas:
 
-- Exact extracted clause text.
-- Page number and confidence.
-- Cedar policy ID, decision, and normalized facts.
-- Approved static statutory reference snippets.
+python
 
-### Required structured output
+class RecommendedActionSchema(BaseModel):
+    action_id: str
+    label: str
+    effort_level: str
+    is_recommended: bool
+    reason: str
+    escalation_order: int
+class CaseTrackingFields(BaseModel):
+    contact_attempts: int = 0
+    first_contact_date: Optional[str] = None
+Add to AnalysisReport:
 
-```json
-{
-  "summary": "Plain-language explanation based only on supplied evidence.",
-  "counter_clause": "A proposed contractual clause for review.",
-  "next_steps": ["Verify MSME eligibility", "Discuss proposed wording"],
-  "limitations": "Informational guidance only; consult a qualified professional."
-}
-```
+python
 
-### Guardrails
+recommended_actions: Optional[List[RecommendedActionSchema]] = None
+contact_attempts: int = Field(0, description="Number of contact attempts made for this case")
+first_contact_date: Optional[str] = Field(None, description="ISO date of first contact attempt")
+[MODIFY] 
+db.py
+ — init_sqlite_db()
+Add two columns to analyses_history:
 
-- Reject output that adds a fact not present in the input evidence.
-- Never fabricate a case citation, government filing number, interest amount, or legal outcome.
-- Always include the limitations statement.
-- If evidence is insufficient, output `needs_human_review` instead of a confident conclusion.
+sql
 
-## Event Delivery Plan
+ALTER TABLE analyses_history ADD COLUMN contact_attempts INTEGER DEFAULT 0;
+ALTER TABLE analyses_history ADD COLUMN first_contact_date TEXT;
+(Wrapped in try/except for idempotency since SQLite ALTER TABLE doesn't support IF NOT EXISTS.)
 
-### Before the event: learn and prepare, do not build the entry
+[MODIFY] 
+schema.sql
+ — analyses_history table
+Add:
 
-- Read the hackathon rules and verify the exact start/deadline.
-- Create an AWS Builder Center profile and obtain the credits/sandbox needed for Ship It.
-- Practice independently with Cognito, S3 presigned URLs, Textract, Step Functions, Cedar, Bedrock, DynamoDB, and Amplify.
-- Draft architecture, user story, acceptance criteria, sample document text, and demo script.
-- Assign team responsibilities and agree on one decision-maker for scope cuts.
-- Prepare a list of third-party assets and tools to disclose in the writeup.
+sql
 
-### Day 1: establish a deployed vertical slice
+contact_attempts   INTEGER NOT NULL DEFAULT 0,
+first_contact_date TIMESTAMPTZ
+[MODIFY] 
+api.py
+In analyse_contract (~line 695): call DecisionRecommender.recommend(...) with initial contact_attempts=0 and attach to report.
+New endpoint POST /api/analyses/{report_id}/contact — increments contact_attempts, sets first_contact_date on first call, re-runs DecisionRecommender, and returns updated recommendation. This is the "mark as sent" button handler.
+Component 3 — Evidence Panel (Backend Improvements)
+ViolationItem already has the right fields. The gap is: start_char/end_char are never populated, and there's no page_number or clause_reference.
 
-**Outcome:** A signed-in user uploads a file and sees a real processing state.
+[MODIFY] 
+extractor.py
+In all three extraction helpers (_extract_payment_terms, _extract_interest_terms, _extract_cancellation_terms):
 
-- Create the new public repository after the event begins.
-- Add a concise README with the problem, architecture, and build log.
-- Deploy Cognito, S3, API Gateway, Lambda, DynamoDB, and Amplify.
-- Implement sign-in and tenant-scoped presigned upload URL issuance.
-- Store a `PROCESSING` report record in DynamoDB.
-- Trigger a Step Functions workflow when the upload completes.
-- Add CloudWatch logs with correlation IDs, without raw document text.
+Actually populate start_char and end_char from match.start() / match.end() (the regex match objects are already available but their offsets are discarded).
+Add a simple page estimation heuristic: page_number = (start_char // avg_chars_per_page) + 1 where avg_chars_per_page ≈ 3000 (reasonable for A4 text). This is a rough estimate for plain-text; for actual PDFs ingested via Textract, Textract already returns page numbers which should be threaded through.
+Extract clause reference (e.g., "§14.2", "Clause 7.1") via a new regex pattern:
+python
 
-**Day 1 exit gate:** A fresh user can upload one real file at the deployed URL, and the object appears in the correct S3 prefix.
+CLAUSE_REF_PATTERN = r'(?:clause|section|article|§)\s*(\d+(?:\.\d+)*)'
+Search near the matched region and attach as clause_reference on ExtractedClause.
+[MODIFY] 
+schemas.py
+ — EvidenceItem
+Add:
 
-### Day 2: make extraction and policy decisions real
+python
 
-**Outcome:** The system identifies one compliant and one risky payment clause correctly.
+page_number: Optional[int] = Field(None, description="Estimated or Textract-derived page number in source document")
+clause_reference: Optional[str] = Field(None, description="Contract clause reference (e.g. §14.2, Clause 7.1)")
+[MODIFY] 
+schemas.py
+ — ExtractedClause (in pipeline/extractor.py)
+Add:
 
-- Add asynchronous Textract processing to the state machine.
-- Build a normalizer that extracts candidate payment terms with source page/confidence.
-- Implement the three Cedar rules and policy-version field.
-- Store raw evidence, normalized facts, and policy results in DynamoDB.
-- Build the report view: original clause, confidence, finding, and policy label.
-- Write unit tests for every policy and boundary condition.
+python
 
-**Day 2 exit gate:** A 90-day/no-interest sample is flagged; a clear 30-day payment sample is not flagged.
+page_number: Optional[int] = Field(None, description="Estimated page number")
+clause_reference: Optional[str] = Field(None, description="Clause/section reference identifier")
+[MODIFY] 
+api.py
+ — analyse_contract
+When constructing ViolationItem objects (~lines 530–680), propagate start_char, end_char, page_number, and clause_reference from the matched ExtractedClause into the EvidenceItem.
 
-### Day 3: turn evidence into action
+Component 4 — Financial Impact Calculator (Compound Interest)
+This is the one correctness-critical item. Section 16 mandates compound interest with monthly rests at 3× RBI bank rate.
 
-**Outcome:** A user receives grounded, useful guidance without false legal certainty.
+[NEW] 
+financial.py
+New standalone module:
 
-- Add Bedrock structured generation after Cedar evaluation.
-- Enforce the grounding contract and limitations message.
-- Display a counter-clause and next-step checklist beside the evidence.
-- Add an HTML/JSON evidence report download only if it is stable.
-- Add deletion for the current user's document/report.
-- Test cross-tenant denial with two distinct Cognito users.
+python
 
-**Day 3 exit gate:** The same report is useful to a user, explainable to a judge, and inaccessible to another user.
+def month_diff(start: date, end: date) -> int:
+    """Exact number of complete calendar months between two dates."""
+    return (end.year - start.year) * 12 + (end.month - start.month)
+def calculate_statutory_interest(
+    principal: float,
+    due_date: date,
+    payment_date: date,
+    rbi_rate: float = 6.5
+) -> StatutoryInterestResult:
+    """
+    Section 16 MSMED Act 2006: compound interest with monthly rests
+    at 3× RBI bank rate from due_date to payment_date.
+    """
+    monthly_rate = (3 * rbi_rate) / 12 / 100
+    months_overdue = month_diff(due_date, payment_date)
+    interest = principal * ((1 + monthly_rate) ** months_overdue - 1)
+    return StatutoryInterestResult(
+        principal=principal,
+        due_date=due_date,
+        payment_date=payment_date,
+        delay_days=(payment_date - due_date).days,
+        months_overdue=months_overdue,
+        rbi_bank_rate=rbi_rate,
+        statutory_rate=3 * rbi_rate,
+        monthly_rate=round(monthly_rate * 100, 4),
+        interest_amount=round(interest, 2),
+        total_recoverable=round(principal + interest, 2),
+    )
+StatutoryInterestResult is a Pydantic model with all breakdown fields for the UI display.
 
-### Day 4: harden, record, submit
+IMPORTANT
 
-**Outcome:** A reproducible demonstration and on-time submission.
+Verification requirement: Before trusting this function, I will write a unit test with a hand-calculated example. For instance: ₹10,00,000 principal, 90 days overdue (3 months), RBI rate 6.5% → monthly rate = (3 × 6.5) / 12 / 100 = 0.01625 → interest = 10,00,000 × ((1.01625)³ − 1) = ₹49,565.86. The test will assert this exact value.
 
-- Execute the full workflow repeatedly from clean browser sessions.
-- Fix defects before adding polish.
-- Run the test suite and capture results.
-- Verify IAM, private bucket access, missing-secret behavior, and error states.
-- Record a first acceptable three-minute video early.
-- Submit repository, URL, video, and writeup before the deadline.
-- Improve visuals only after the submission is safely complete.
+[MODIFY] 
+scorer.py
+Replace the simple interest line (contract_value * daily_interest_rate * effective_delay_days) with a call to calculate_statutory_interest() from the new financial.py, using sensible defaults for due_date (today - delay_days) and payment_date (today).
 
-**Day 4 exit gate:** Every claim in the README and video is visible in the deployed application or AWS console.
+[MODIFY] 
+api.py
+ — analyse_contract
+Replace the inline interest calculations (~lines 540, 580) with calls to calculate_statutory_interest().
+Add financial_breakdown field to the response containing the full StatutoryInterestResult for the UI's "wow" screen.
+[MODIFY] 
+schemas.py
+ — FinancialImpact
+Add detailed breakdown fields:
 
-## Test Plan
+python
 
-### Unit tests
+months_overdue: Optional[int] = Field(None, description="Complete calendar months of overdue payment")
+monthly_compound_rate: Optional[float] = Field(None, description="Monthly compound interest rate applied (%)")
+rbi_bank_rate: Optional[float] = Field(None, description="RBI bank rate used for calculation")
+principal_amount: Optional[float] = Field(None, description="Invoice/contract principal amount")
+total_recoverable: Optional[float] = Field(None, description="Principal + compound interest = total claim")
+calculation_method: str = Field("compound_monthly_rests", description="Interest compounding method used")
+[NEW] 
+test_financial.py
+Unit tests:
 
-- Payment days: 30, 45, 46, 60, and 90 days.
-- Interest language: statutory language, explicit waiver, unrelated mention of interest, and absent term.
-- Termination language: bilateral vs unilateral.
-- Normalizer behavior for numeric and word forms such as `ninety days`.
-- Low-confidence and missing extraction handling.
-- Bedrock output schema validation and unsupported-fact rejection.
+Hand-calculated compound interest: ₹10,00,000, 3 months overdue, RBI 6.5% → ₹49,565.86 interest
+Zero delay: 0 months → ₹0 interest
+Edge case: same due_date and payment_date → ₹0
+Large delay: 12 months overdue → verify against manual calculation
+month_diff correctness: various date pairs
+Component 5 — Negotiation Recommendation (Pre-Signature Clause Rewrite)
+Reuse the existing action agent's clause-drafting logic with a different entry point and framing.
 
-### Integration tests
+[MODIFY] 
+action.py
+Add a new function negotiate_clause(clause_text: str, violation_type: str, cited_law: str) -> str that:
 
-- Authenticated user gets an upload URL only for their tenant prefix.
-- S3 upload triggers one state-machine execution.
-- A completed Textract result produces a report record.
-- Report lookup succeeds for the owner and returns `403`/`404` for another user.
-- Bad files, failed Textract jobs, failed Bedrock calls, and timeouts produce useful status without simulated findings.
+Uses the same Strands agent / LLM fallback pattern as action_node
+But with a different prompt template framed for pre-signature review:
 
-### Demo fixtures
+"You are reviewing a contract clause BEFORE signing. Rewrite this clause to be MSME-compliant.
+ Original clause: {clause_text}
+ Violation: {violation_type} under {cited_law}
+ Provide: 1) The compliant replacement clause, 2) One sentence explaining why the original is risky."
+Returns a NegotiationResult with original_clause, compliant_replacement, risk_explanation
+[MODIFY] 
+schemas.py
+Add:
 
-Create fixtures during the event and label them as synthetic:
+python
 
-1. Compliant 30-day payment clause.
-2. Risky 90-day payment clause with interest waiver.
-3. Ambiguous low-confidence scan that becomes `NEEDS_REVIEW`.
+class NegotiationRecommendation(BaseModel):
+    original_clause: str
+    violation_type: str
+    cited_law: str
+    compliant_replacement: str
+    risk_explanation: str
+    confidence: float
+Add to AnalysisReport:
 
-## Three-Minute Demo Script
+python
 
-| Time | What judges see | Point being proven |
-| --- | --- | --- |
-| 0:00-0:20 | Delayed-payment problem and target user | Real impact |
-| 0:20-0:50 | Sign in and upload a real synthetic contract | Working product, Cognito, S3 |
-| 0:50-1:20 | Processing state then extracted source clause | Textract and orchestration |
-| 1:20-1:55 | Cedar policy ID, evidence, confidence, and decision | Deterministic explainability |
-| 1:55-2:25 | Grounded Bedrock counter-clause and limitations | Useful AI, safely constrained |
-| 2:25-2:45 | Deployed architecture plus Step Functions/DynamoDB/CloudWatch | AWS is essential, not decorative |
-| 2:45-3:00 | What the team learned and next-step impact | Learning and realistic vision |
+negotiation_recommendations: Optional[List[NegotiationRecommendation]] = None
+[MODIFY] 
+api.py
+ — analyse_contract
+After building violations, call negotiate_clause() for each violation that has a draft_counter_clause and attach results as negotiation_recommendations on the report. This reuses the existing draft_counter_clause data as a deterministic fallback, with the LLM providing enhanced framing.
 
-Do not show a mocked result, a broken upload, placeholder dashboard data, or services that are not actually deployed.
+[NEW endpoint] 
+api.py
+ — POST /api/negotiate
+New endpoint that accepts a single clause text + context and returns a NegotiationRecommendation. This is the "review before signing" entry point, separate from the full analysis pipeline:
 
-## Judge Questions and Answers
+python
 
-### Why Cedar instead of asking an LLM to decide?
+class NegotiateRequest(BaseModel):
+    clause_text: str
+    buyer_name: Optional[str] = None
+    contract_value: Optional[float] = None
+@app.post("/api/negotiate", tags=["Core Product"])
+async def negotiate_clause_endpoint(req: NegotiateRequest, user: UserContext = Depends(get_current_user)):
+    # 1. Extract clause → 2. Cedar evaluate → 3. For each violation, negotiate_clause()
+    # Returns List[NegotiationRecommendation]
+Summary of All File Changes
+File	Action	Component
+pipeline/scorer.py
+MODIFY	1 (Risk Score) + 4 (use compound interest)
+pipeline/recommender.py
+NEW	2 (Decision Recommendation)
+pipeline/financial.py
+NEW	4 (Financial Calculator)
+pipeline/extractor.py
+MODIFY	3 (Evidence Panel — populate offsets/page/clause ref)
+pipeline/__init__.py
+MODIFY	Export new classes
+models/schemas.py
+MODIFY	1, 2, 3, 4, 5 (new fields + schemas)
+Agents/action.py
+MODIFY	5 (Negotiation — new negotiate_clause())
+api.py
+MODIFY	1, 2, 3, 4, 5 (update analyse, new endpoints)
+SQL/db.py
+MODIFY	2 (add contact_attempts columns)
+SQL/schema.sql
+MODIFY	2 (add contact_attempts columns)
+tests/test_financial.py
+NEW	4 (compound interest unit tests)
+tests/test_scorer.py
+NEW	1 (risk score unit tests)
+tests/test_recommender.py
+NEW	2 (decision ladder unit tests)
+Open Questions
+IMPORTANT
 
-Cedar makes the policy decision deterministic, testable, versioned, and auditable. Bedrock explains the result; it does not decide the rule outcome.
+RBI Bank Rate source: The current code hardcodes 6.5%. Should this remain hardcoded for now, or should we add an env var / config field so it can be updated when RBI changes the rate? (The rate changes ~2-4× per year.)
 
-### How do you prevent hallucinated legal advice?
+IMPORTANT
 
-The model receives only extracted evidence, normalized facts, policy findings, and approved reference snippets. Its output is structured, validated, and labeled as informational guidance rather than legal advice.
+Contact tracking scope: The "mark as sent" endpoint (POST /api/analyses/{report_id}/contact) — should it also log an audit event via audit/logger.py, or is simple DB update sufficient for now?
 
-### How do you protect confidential contracts?
+IMPORTANT
 
-Cognito determines the tenant, S3 objects use tenant-scoped private prefixes, APIs authorize every report read, DynamoDB queries are tenant-scoped, and the system does not expose public document URLs.
+Negotiation endpoint auth: Should POST /api/negotiate count against the org's monthly analysis quota, or should it be treated as a separate (cheaper) quota bucket? It runs less compute than a full analysis.
 
-### What happens when OCR confidence is poor?
+Verification Plan
+Automated Tests
+bash
 
-The system surfaces the text and confidence but marks the result as requiring human review. It does not create a confident compliance finding from unreliable extraction.
+# Unit tests for financial calculator (hand-calculated compound interest)
+pytest tests/test_financial.py -v
+# Unit tests for risk score deductions
+pytest tests/test_scorer.py -v
+# Unit tests for decision recommendation ladder
+pytest tests/test_recommender.py -v
+# Full test suite
+pytest tests/ -v --tb=short
+Manual Verification
+Risk Score: Run POST /api/analyse with a 90-day payment clause + no interest + unilateral cancellation → expect score = 100 - 35 - 20 - 15 = 30 (critical/red), with all 3 deductions visible in breakdown
+Decision Ladder: Call POST /api/analyses/{id}/contact twice, verify recommendation escalates from "Send Demand" → "Formal Notice" → (after 30 days) "File Samadhaan"
+Evidence Panel: Verify page_number, clause_reference, start_char, end_char are populated in violation evidence items
+Financial Calculator: Compare ₹15,00,000 × 3 months overdue output against manual Excel calculation
+Negotiation: Call POST /api/negotiate with a violating clause, verify compliant replacement is returned
+Build Verification
+bash
 
-### What did the team learn during the event?
-
-Name concrete outcomes: asynchronous workflow design with Step Functions, document extraction with Textract, policy-as-code with Cedar, grounded generation with Bedrock, and least-privilege tenant isolation on AWS.
-
-## Submission Checklist
-
-- [ ] New repository created after the event begins.
-- [ ] Repository history clearly shows event-window work.
-- [ ] README includes architecture, AWS services, limitations, and AI-tool disclosure.
-- [ ] Deployed URL works from an incognito browser session.
-- [ ] Video is under three minutes and shows the real deployed flow.
-- [ ] All architecture claims are visible in code, deployment, or video.
-- [ ] Core tests pass.
-- [ ] No secrets, credentials, `.env`, local database, or private documents are committed.
-- [ ] Upload, policy evaluation, Bedrock explanation, and tenant isolation were rechecked before submission.
-- [ ] Submission was sent early enough to recover from upload/platform failure.
-
-## Definition of Winning
-
-The project is winning when a judge can state, without reading the code:
-
-"This solves a real MSME problem. The team built a live AWS workflow. The contract evidence, rule decision, and AI explanation are clearly separated. It works, it respects uncertainty, and it can plausibly help a supplier tomorrow."
+# Ensure API starts cleanly
+python main.py --serve-api
+# Hit health endpoint
+curl http://localhost:8000/api/health

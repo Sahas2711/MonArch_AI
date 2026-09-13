@@ -137,11 +137,23 @@ def init_sqlite_db(db_path: str = "monarch.db"):
             compliance_score INTEGER NOT NULL,
             violations_count INTEGER NOT NULL DEFAULT 0,
             report_data TEXT NOT NULL,
+            contact_attempts INTEGER NOT NULL DEFAULT 0,
+            first_contact_date TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE INDEX IF NOT EXISTS idx_analyses_org_history ON analyses_history (org_id, created_at);
         """
     )
+    # Ensure contact tracking columns exist on existing databases
+    try:
+        cursor.execute("ALTER TABLE analyses_history ADD COLUMN contact_attempts INTEGER DEFAULT 0;")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE analyses_history ADD COLUMN first_contact_date TEXT;")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
     log.info("Initialized local database schema at %s", db_path)

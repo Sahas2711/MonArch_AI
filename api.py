@@ -20,7 +20,7 @@ import shutil
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 import anyio
 
@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from langchain_core.messages import HumanMessage
 
+from Agents.action import negotiate_clause
 from Agents.graph import graph
 from auth.cognito import UserContext
 from auth.dependencies import get_current_user
@@ -44,7 +45,23 @@ from middleware.quota import (
     upgrade_org_plan,
     verify_org_access,
 )
-from models.schemas import AnalysisReport, ViolationItem
+from models.schemas import (
+    AnalysisReport,
+    AuditOutput,
+    EvidenceItem,
+    FinancialImpact,
+    NegotiationRecommendation,
+    RecommendedActionSchema,
+    ReviewActionPayload,
+    ReviewDecisionSchema,
+    RiskScoreBreakdown,
+    ViolationItem,
+)
+from pipeline.confidence import ConfidenceGate
+from pipeline.extractor import ClauseExtractor
+from pipeline.financial import calculate_statutory_interest
+from pipeline.recommender import DecisionRecommender
+from pipeline.scorer import ComplianceScorer
 from RAG.manager import rag_manager
 from SQL.db import get_pg_pool, get_sqlite_connection, init_sqlite_db
 from SQL.memory_consolidator import distill_and_store_facts
@@ -473,18 +490,26 @@ async def admin_list_users():
 
 @app.post("/api/analyse", response_model=AnalysisReport, tags=["Core Product"])
 async def analyse_contract(
+    request: Request,
     payload: Optional[AnalysePayload] = None,
     file: Optional[UploadFile] = File(None),
     user: UserContext = Depends(get_current_user),
 ):
     """
-    Core SaaS product endpoint for MSME Payment Compliance.
-    Derives org_id securely from JWT identity and enforces monthly plan quota.
-    Audits contract terms against Section 15 & 16 of MSME Development Act 2006
-    and Section 43B(h) of Income Tax Act 1961.
+    Core decision-support pipeline for MSME Payment Compliance.
+    5-stage evaluation: Extract -> Cedar Policy -> Scorer -> Explanation -> Confidence Gate.
     """
     # 1. Enforce Quota and derive org_id securely (IDOR protection)
     org_id = await check_quota(user, "analysis")
+
+    # If payload is None or not populated by form parser, try reading JSON body directly
+    if payload is None or (payload.message is None and payload.buyer_name == "Buyer Enterprise Pvt Ltd"):
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and body:
+                payload = AnalysePayload(**body)
+        except Exception:
+            pass
 
     # 2. Extract content from either uploaded file or JSON payload
     contract_text = ""
@@ -511,37 +536,71 @@ async def analyse_contract(
             "of accepted goods. No interest shall accrue on delayed disbursements under any circumstances."
         )
 
-    # 3. Analyze Compliance Rules against Indian Statutes via Cedar Policy Engine
+    # Stage 1: Structured Clause Extraction
+    extractor = ClauseExtractor()
+    extracted_clauses = extractor.extract_from_text(
+        text=contract_text,
+        buyer_name=buyer_name,
+        contract_value=contract_value,
+    )
+
+    # Stage 2: Statutory Policy Evaluation (Cedar Policy Engine)
     from Agents.fairness import fairness_node
-    parsed_clauses = [
+    fairness_clauses = [
         {
-            "id": "clause_1",
-            "raw_text": contract_text,
-            "payment_days": 90 if ("90" in text_lower or "ninety" in text_lower) else (60 if "60" in text_lower else 30),
-            "has_penalty_interest": False if ("no interest" in text_lower or "without interest" in text_lower or "waive interest" in text_lower) else True,
-            "has_unilateral_cancellation": True if ("cancel" in text_lower or "unilateral" in text_lower or "without notice" in text_lower) else False,
-            "buyer_type": "large_enterprise",
+            "id": c.clause_id,
+            "raw_text": c.raw_text,
+            "payment_days": c.payment_days if c.payment_days is not None else 30,
+            "has_penalty_interest": c.has_penalty_interest if c.has_penalty_interest is not None else True,
+            "has_unilateral_cancellation": c.has_unilateral_cancellation if c.has_unilateral_cancellation is not None else False,
+            "buyer_type": c.buyer_type,
         }
+        for c in extracted_clauses
     ]
-    
+
     fairness_res = await fairness_node({
-        "extracted_clauses": parsed_clauses,
+        "extracted_clauses": fairness_clauses,
         "active_policy_pack": "msme_payment_terms",
     })
     cedar_violations = fairness_res.get("fairness_violations", [])
 
+    # Map Cedar & Extracted violations into structured ViolationItem with Evidence & FinancialImpact
     violations: List[ViolationItem] = []
+    
+    primary_days = 30
+    for c in extracted_clauses:
+        if c.payment_days is not None:
+            primary_days = c.payment_days
+            break
 
-    # Rule 1: Section 15 of MSME Development Act 2006 (Payment period cap)
-    has_90_days = "90" in text_lower or "ninety" in text_lower
-    has_60_days = "60" in text_lower or "sixty" in text_lower
-    has_120_days = "120" in text_lower or "one hundred twenty" in text_lower
+    # Extracted clause lookups for precise evidence anchoring
+    payment_clause = next((c for c in extracted_clauses if c.clause_type == "payment_terms"), None)
+    interest_clause = next((c for c in extracted_clauses if c.clause_type == "interest_penalty"), None)
+    cancel_clause = next((c for c in extracted_clauses if c.clause_type == "cancellation"), None)
 
-    if cedar_violations or has_90_days or has_60_days or has_120_days or "exceeds" in text_lower or "net 90" in text_lower or "net 60" in text_lower:
-        days_mentioned = "90" if has_90_days else ("60" if has_60_days else "120")
+    today = date.today()
+
+    # Rule 1: Payment period cap (MSMED Act Sec 15)
+    has_payment_violation = any(
+        "Rule 1" in str(r) or "Section 15" in str(r)
+        for v in cedar_violations for r in v.get("matched_rules", [])
+    ) or (primary_days > 45)
+
+    if has_payment_violation:
+        delay_days = max(0, primary_days - 45)
+        effective_delay = delay_days if delay_days > 0 else 45
+        due_date = today - timedelta(days=effective_delay)
+        stat_interest_payment = calculate_statutory_interest(
+            principal=contract_value,
+            due_date=due_date,
+            payment_date=today,
+        )
+        interest_exp = stat_interest_payment.interest_amount
+        tax_exp = round(contract_value * 0.25, 2)
+        
         violations.append(
             ViolationItem(
-                clause_text=f"Payment term specified as {days_mentioned} days from invoice or delivery date.",
+                clause_text=f"Payment term specified as {primary_days} days from invoice or delivery date.",
                 violation_type="payment_cycle",
                 cited_law="MSME Development Act 2006, Section 15 (Mandatory 45-Day Maximum Cap)",
                 cited_chunk_id="msme_act_2006_sec15",
@@ -552,18 +611,49 @@ async def analyse_contract(
                     "of the Micro, Small and Medium Enterprises Development Act, 2006."
                 ),
                 samadhaan_ready=True,
+                evidence=EvidenceItem(
+                    source_text=payment_clause.raw_text if payment_clause else contract_text[:300],
+                    start_char=payment_clause.start_char if payment_clause else 0,
+                    end_char=payment_clause.end_char if payment_clause else min(len(contract_text), 300),
+                    matched_keywords=[f"{primary_days} days", "payment terms"],
+                    rag_chunk_id="msme_act_2006_sec15",
+                    statute_ref="MSMED Act 2006 Section 15",
+                    page_number=payment_clause.page_number if payment_clause else 1,
+                    clause_reference=payment_clause.clause_reference if payment_clause else None,
+                ),
+                financial_impact=FinancialImpact(
+                    estimated_delay_days=delay_days,
+                    statutory_interest_rate_percent=stat_interest_payment.statutory_rate,
+                    estimated_interest_exposure=interest_exp,
+                    tax_disallowance_risk=True,
+                    estimated_tax_exposure=tax_exp,
+                    total_financial_exposure=round(interest_exp + tax_exp, 2),
+                    months_overdue=stat_interest_payment.months_overdue,
+                    monthly_compound_rate=stat_interest_payment.monthly_rate,
+                    rbi_bank_rate=stat_interest_payment.rbi_bank_rate,
+                    principal_amount=contract_value,
+                    total_recoverable=stat_interest_payment.total_recoverable,
+                    calculation_method=stat_interest_payment.calculation_method,
+                ),
+                confidence=0.95,
+                needs_human_review=False,
             )
         )
 
-    # Rule 2: Section 16 of MSME Development Act 2006 (Mandatory Compound Interest)
-    if (
-        "no interest" in text_lower
-        or "without interest" in text_lower
-        or "waive interest" in text_lower
-        or "no penalty" in text_lower
-        or "disbursements" in text_lower
-        or any("Rule 2" in r for v in cedar_violations for r in v.get("matched_rules", []))
-    ):
+    # Rule 2: Interest penalty waiver (MSMED Act Sec 16)
+    has_interest_violation = any(
+        "Rule 2" in str(r) or "Section 16" in str(r)
+        for v in cedar_violations for r in v.get("matched_rules", [])
+    ) or any(c.has_penalty_interest is False for c in extracted_clauses)
+
+    if has_interest_violation:
+        due_date_interest = today - timedelta(days=60)
+        stat_interest_waiver = calculate_statutory_interest(
+            principal=contract_value,
+            due_date=due_date_interest,
+            payment_date=today,
+        )
+        interest_exp = stat_interest_waiver.interest_amount
         violations.append(
             ViolationItem(
                 clause_text="Contract states that no interest or penalty shall accrue on delayed disbursements.",
@@ -577,30 +667,190 @@ async def analyse_contract(
                     "Reserve Bank of India on the unpaid sum, in accordance with Section 16 of the MSMED Act 2006."
                 ),
                 samadhaan_ready=True,
+                evidence=EvidenceItem(
+                    source_text=interest_clause.raw_text if interest_clause else "No interest shall accrue on delayed disbursements.",
+                    start_char=interest_clause.start_char if interest_clause else None,
+                    end_char=interest_clause.end_char if interest_clause else None,
+                    matched_keywords=["no interest", "without interest", "no penalty"],
+                    rag_chunk_id="msme_act_2006_sec16",
+                    statute_ref="MSMED Act 2006 Section 16",
+                    page_number=interest_clause.page_number if interest_clause else 1,
+                    clause_reference=interest_clause.clause_reference if interest_clause else None,
+                ),
+                financial_impact=FinancialImpact(
+                    estimated_delay_days=60,
+                    statutory_interest_rate_percent=stat_interest_waiver.statutory_rate,
+                    estimated_interest_exposure=interest_exp,
+                    tax_disallowance_risk=False,
+                    estimated_tax_exposure=0.0,
+                    total_financial_exposure=interest_exp,
+                    months_overdue=stat_interest_waiver.months_overdue,
+                    monthly_compound_rate=stat_interest_waiver.monthly_rate,
+                    rbi_bank_rate=stat_interest_waiver.rbi_bank_rate,
+                    principal_amount=contract_value,
+                    total_recoverable=stat_interest_waiver.total_recoverable,
+                    calculation_method=stat_interest_waiver.calculation_method,
+                ),
+                confidence=0.92,
+                needs_human_review=False,
             )
         )
 
     # Rule 3: Income Tax Act Section 43B(h) (Buyer Expense Disallowance Warning)
-    violations.append(
-        ViolationItem(
-            clause_text=f"Applicable to aggregate transactions totaling ₹{contract_value:,.2f} with Micro/Small Enterprises.",
-            violation_type="tax_disallowance",
-            cited_law="Income Tax Act 1961, Section 43B(h) (Finance Act 2023 Disallowance on Overdue MSME Dues)",
-            cited_chunk_id="income_tax_sec_43bh",
-            severity="medium",
-            draft_counter_clause=(
-                "Statutory Advisory: Failure by the Buyer to settle supplier dues within the Section 15 timeframe "
-                "will result in total deduction disallowance for income tax computation under Section 43B(h), "
-                "increasing the Buyer's taxable profit."
-            ),
-            samadhaan_ready=False,
+    if has_payment_violation:
+        tax_exp = round(contract_value * 0.25, 2)
+        violations.append(
+            ViolationItem(
+                clause_text=f"Applicable to aggregate transactions totaling ₹{contract_value:,.2f} with Micro/Small Enterprises.",
+                violation_type="tax_disallowance",
+                cited_law="Income Tax Act 1961, Section 43B(h) (Finance Act 2023 Disallowance on Overdue MSME Dues)",
+                cited_chunk_id="income_tax_sec_43bh",
+                severity="medium",
+                draft_counter_clause=(
+                    "Statutory Advisory: Failure by the Buyer to settle supplier dues within the Section 15 timeframe "
+                    "will result in total deduction disallowance for income tax computation under Section 43B(h), "
+                    "increasing the Buyer's taxable profit."
+                ),
+                samadhaan_ready=False,
+                evidence=EvidenceItem(
+                    source_text=f"Transaction value: INR {contract_value:,.2f}",
+                    start_char=payment_clause.start_char if payment_clause else None,
+                    end_char=payment_clause.end_char if payment_clause else None,
+                    matched_keywords=["Section 43B(h)", "tax deduction disallowance"],
+                    rag_chunk_id="income_tax_sec_43bh",
+                    statute_ref="Income Tax Act 1961 Section 43B(h)",
+                    page_number=payment_clause.page_number if payment_clause else 1,
+                    clause_reference=payment_clause.clause_reference if payment_clause else None,
+                ),
+                financial_impact=FinancialImpact(
+                    estimated_delay_days=0,
+                    statutory_interest_rate_percent=0.0,
+                    estimated_interest_exposure=0.0,
+                    tax_disallowance_risk=True,
+                    estimated_tax_exposure=tax_exp,
+                    total_financial_exposure=tax_exp,
+                    principal_amount=contract_value,
+                    total_recoverable=contract_value,
+                    calculation_method="statutory_disallowance",
+                ),
+                confidence=0.90,
+                needs_human_review=False,
+            )
         )
+
+    # Rule 4: Unilateral Cancellation
+    has_unilateral = any(
+        "Rule 3" in str(r) or "unilateral" in str(r).lower()
+        for v in cedar_violations for r in v.get("matched_rules", [])
+    ) or any(c.has_unilateral_cancellation is True for c in extracted_clauses)
+
+    if has_unilateral:
+        violations.append(
+            ViolationItem(
+                clause_text="Buyer reserves the right to unilaterally terminate or cancel the contract without notice or liability.",
+                violation_type="unilateral_cancellation",
+                cited_law="Indian Contract Act 1872 / Unfair Trade Practices",
+                cited_chunk_id="contract_act_sec_fairness",
+                severity="medium",
+                draft_counter_clause=(
+                    "Substituted Clause: Either party may terminate this agreement only upon giving at least 30 (thirty) "
+                    "days prior written notice specifying the cause, with full compensation for completed milestones."
+                ),
+                samadhaan_ready=False,
+                evidence=EvidenceItem(
+                    source_text=cancel_clause.raw_text if cancel_clause else "Right to terminate without notice or liability",
+                    start_char=cancel_clause.start_char if cancel_clause else None,
+                    end_char=cancel_clause.end_char if cancel_clause else None,
+                    matched_keywords=["unilateral", "without notice", "without liability"],
+                    rag_chunk_id="contract_act_sec_fairness",
+                    statute_ref="Indian Contract Act 1872",
+                    page_number=cancel_clause.page_number if cancel_clause else 1,
+                    clause_reference=cancel_clause.clause_reference if cancel_clause else None,
+                ),
+                confidence=0.88,
+                needs_human_review=False,
+            )
+        )
+
+    # Stage 3: Scorer Module (Rule-based deductions & compound interest)
+    scorer = ComplianceScorer()
+    score_res = scorer.calculate_score(
+        violations=[{"violation_type": v.violation_type, "confidence": v.confidence} for v in violations],
+        clauses=extracted_clauses,
+        contract_value=contract_value,
+    )
+    compliance_score = score_res.score
+    risk_level = score_res.risk_level
+
+    # Stage 4 & 5: Confidence Gate & Human-in-the-Loop Review
+    gate = ConfidenceGate()
+    review_res = gate.evaluate(clauses=extracted_clauses, violations=cedar_violations)
+    review_decision = ReviewDecisionSchema(
+        needs_human_review=review_res.needs_human_review,
+        review_reasons=review_res.review_reasons,
+        confidence_score=review_res.confidence_score,
+        auto_approved=review_res.auto_approved,
+        flags=review_res.flags,
+        recommended_action=review_res.recommended_action,
     )
 
-    # Calculate compliance score
-    high_violations = sum(1 for v in violations if v.severity == "high")
-    med_violations = sum(1 for v in violations if v.severity == "medium")
-    compliance_score = max(5, 100 - (high_violations * 35 + med_violations * 15))
+    # Financial Summary with compound monthly breakdown
+    delay_days = max(0, primary_days - 45) if has_payment_violation else 0
+    effective_summary_delay = delay_days if delay_days > 0 else (60 if (has_payment_violation or has_interest_violation) else 0)
+    summary_due_date = today - timedelta(days=effective_summary_delay) if effective_summary_delay > 0 else today
+    stat_summary = calculate_statutory_interest(
+        principal=contract_value,
+        due_date=summary_due_date,
+        payment_date=today,
+    )
+
+    financial_summary = FinancialImpact(
+        estimated_delay_days=delay_days,
+        statutory_interest_rate_percent=stat_summary.statutory_rate,
+        estimated_interest_exposure=round(stat_summary.interest_amount, 2),
+        tax_disallowance_risk=score_res.tax_disallowance_applicable,
+        estimated_tax_exposure=score_res.tax_exposure_estimate,
+        total_financial_exposure=round(stat_summary.interest_amount + score_res.tax_exposure_estimate, 2),
+        months_overdue=stat_summary.months_overdue,
+        monthly_compound_rate=stat_summary.monthly_rate,
+        rbi_bank_rate=stat_summary.rbi_bank_rate,
+        principal_amount=contract_value,
+        total_recoverable=stat_summary.total_recoverable,
+        calculation_method=stat_summary.calculation_method,
+    )
+
+    # Stage 6: Decision Ladder (A/B/C recommendation)
+    recommender = DecisionRecommender()
+    rec_actions_raw = recommender.recommend(
+        has_violations=len(violations) > 0,
+        contact_attempts=0,
+        first_contact_date=None,
+    )
+    recommended_actions = [
+        RecommendedActionSchema(
+            action_id=a.action_id,
+            label=a.label,
+            effort_level=a.effort_level,
+            is_recommended=a.is_recommended,
+            reason=a.reason,
+            escalation_order=a.escalation_order,
+        )
+        for a in rec_actions_raw
+    ]
+
+    # Stage 7: Pre-signature Negotiation Recommendations
+    negotiation_recommendations: List[NegotiationRecommendation] = []
+    for v in violations:
+        if v.draft_counter_clause:
+            neg_dict = await negotiate_clause(
+                clause_text=v.clause_text,
+                violation_type=v.violation_type,
+                cited_law=v.cited_law,
+                fallback_replacement=v.draft_counter_clause,
+            )
+            negotiation_recommendations.append(
+                NegotiationRecommendation(**neg_dict)
+            )
 
     report_id = f"WM-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:4].upper()}"
 
@@ -615,12 +865,12 @@ async def analyse_contract(
         f"1. The respondent buyer procured supplies but failed to disburse payment within statutory 45 days.\n"
         f"2. Any contractual clause extending credit beyond 45 days is void ab initio under Section 15.\n"
         f"3. Demand is hereby made for principal sum plus accrued compound interest from the appointment date."
-    )
+    ) if len(violations) > 0 else None
 
     summary_text = (
         f"Compliance audit completed for contract with '{buyer_name}'. "
-        f"Found {len(violations)} statutory issues under the MSMED Act 2006 and Finance Act 2023. "
-        f"Overall risk assessment: {'CRITICAL VIOLATION' if compliance_score < 50 else 'ATTENTION REQUIRED'}."
+        f"Found {len(violations)} statutory issue(s) under the MSMED Act 2006 and Finance Act 2023. "
+        f"Overall risk assessment: {risk_level.upper()} (Score: {compliance_score}/100, Confidence: {review_res.confidence_score:.0%})."
     )
 
     report = AnalysisReport(
@@ -628,25 +878,37 @@ async def analyse_contract(
         buyer_name=buyer_name,
         file_name=file_name,
         compliance_score=compliance_score,
+        risk_level=risk_level,
         violations=violations,
         overall_summary=summary_text,
         draft_samadhaan_complaint=draft_samadhaan,
         analyzed_at=datetime.utcnow().isoformat(),
+        financial_summary=financial_summary,
+        financial_breakdown=stat_summary.model_dump(mode="json"),
+        review_decision=review_decision,
         disclaimer="For informational and compliance guidance purposes only. Not formal legal advice.",
+        risk_score_breakdown=score_res.breakdown_items,
+        risk_score_disclaimer=score_res.score_disclaimer,
+        recommended_actions=recommended_actions,
+        contact_attempts=0,
+        first_contact_date=None,
+        negotiation_recommendations=negotiation_recommendations,
     )
 
     # 4. Log usage event for multi-tenant metering
     await log_usage_event(org_id, user.user_id, "analysis")
 
     # 5. Save report to analysis history table
+    report_json_str = json.dumps(report.model_dump(mode="json"))
+
     pool = await get_pg_pool()
     if pool is not None:
         try:
             async with pool.acquire() as conn:
                 await conn.execute(
                     """
-                    INSERT INTO analyses_history (id, org_id, user_id, buyer_name, file_name, compliance_score, violations_count, report_data)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    INSERT INTO analyses_history (id, org_id, user_id, buyer_name, file_name, compliance_score, violations_count, report_data, contact_attempts, first_contact_date)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                     """,
                     report_id,
                     org_id,
@@ -655,7 +917,9 @@ async def analyse_contract(
                     file_name,
                     compliance_score,
                     len(violations),
-                    json.dumps(report.dict()),
+                    report_json_str,
+                    0,
+                    None,
                 )
         except Exception as exc:
             log.error("Failed to persist analysis to Postgres: %s", exc)
@@ -665,8 +929,8 @@ async def analyse_contract(
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO analyses_history (id, org_id, user_id, buyer_name, file_name, compliance_score, violations_count, report_data)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO analyses_history (id, org_id, user_id, buyer_name, file_name, compliance_score, violations_count, report_data, contact_attempts, first_contact_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
@@ -676,7 +940,9 @@ async def analyse_contract(
                     file_name,
                     compliance_score,
                     len(violations),
-                    json.dumps(report.dict()),
+                    report_json_str,
+                    0,
+                    None,
                 ),
             )
             conn.commit()
@@ -754,6 +1020,247 @@ async def get_analysis_by_id(report_id: str, user: UserContext = Depends(get_cur
         return json.loads(row["report_data"]) if isinstance(row["report_data"], str) else row["report_data"]
     finally:
         conn.close()
+
+
+@app.post("/api/analyses/{report_id}/review", response_model=AnalysisReport, tags=["Core Product"])
+async def review_analysis(
+    report_id: str,
+    payload: ReviewActionPayload,
+    user: UserContext = Depends(get_current_user),
+):
+    """
+    Submit a human-in-the-loop compliance review action (approved | rejected | modified | escalated).
+    Updates analysis record with reviewer action, notes, and audit timestamps.
+    """
+    org_id, _ = await get_user_org(user)
+    conn = get_sqlite_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT report_data FROM analyses_history WHERE id = ? AND org_id = ?",
+            (report_id, org_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Analysis report not found.")
+
+        data = json.loads(row["report_data"]) if isinstance(row["report_data"], str) else row["report_data"]
+
+        # Update review decision metadata
+        if "review_decision" in data and data["review_decision"]:
+            data["review_decision"]["needs_human_review"] = False
+            data["review_decision"]["recommended_action"] = payload.action
+            if payload.notes:
+                flags = data["review_decision"].get("flags", [])
+                flags.append(f"Reviewer ({payload.reviewer_name}): {payload.notes}")
+                data["review_decision"]["flags"] = flags
+
+        # If reviewer modified violations, update them
+        if payload.modified_violations:
+            data["violations"] = [v.dict() for v in payload.modified_violations]
+            data["compliance_score"] = max(5, 100 - len(data["violations"]) * 25)
+
+        cursor.execute(
+            "UPDATE analyses_history SET report_data = ? WHERE id = ? AND org_id = ?",
+            (json.dumps(data), report_id, org_id),
+        )
+        conn.commit()
+        return AnalysisReport(**data)
+    finally:
+        conn.close()
+
+
+class ContactActionResponse(BaseModel):
+    report_id: str
+    contact_attempts: int
+    first_contact_date: Optional[str]
+    recommended_actions: List[RecommendedActionSchema]
+
+
+@app.post("/api/analyses/{report_id}/contact", response_model=ContactActionResponse, tags=["Core Product"])
+async def record_contact_attempt(report_id: str, user: UserContext = Depends(get_current_user)):
+    """
+    Record a contact attempt with buyer, incrementing escalation counter
+    and updating recommended recovery action ladder.
+    """
+    org_id, _ = await get_user_org(user)
+    pool = await get_pg_pool()
+    now_date = date.today()
+    now_str = now_date.isoformat()
+
+    current_attempts = 0
+    first_date_val = None
+    report_data_raw = None
+
+    if pool is not None:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT contact_attempts, first_contact_date, report_data FROM analyses_history WHERE id = $1 AND org_id = $2",
+                report_id, org_id
+            )
+            if not row:
+                raise HTTPException(status_code=404, detail="Analysis report not found.")
+            current_attempts = row["contact_attempts"] or 0
+            first_date_val = row["first_contact_date"]
+            report_data_raw = row["report_data"]
+    else:
+        conn = get_sqlite_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT contact_attempts, first_contact_date, report_data FROM analyses_history WHERE id = ? AND org_id = ?",
+                (report_id, org_id)
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Analysis report not found.")
+            current_attempts = row["contact_attempts"] or 0
+            first_date_val = row["first_contact_date"]
+            report_data_raw = row["report_data"]
+        finally:
+            conn.close()
+
+    new_attempts = current_attempts + 1
+    new_first_date = str(first_date_val) if first_date_val else now_str
+
+    try:
+        parsed_first_date = date.fromisoformat(new_first_date[:10])
+    except Exception:
+        parsed_first_date = now_date
+
+    recommender = DecisionRecommender()
+    new_actions_raw = recommender.recommend(
+        has_violations=True,
+        contact_attempts=new_attempts,
+        first_contact_date=parsed_first_date,
+        current_date=now_date,
+    )
+    new_actions = [
+        RecommendedActionSchema(
+            action_id=a.action_id,
+            label=a.label,
+            effort_level=a.effort_level,
+            is_recommended=a.is_recommended,
+            reason=a.reason,
+            escalation_order=a.escalation_order,
+        )
+        for a in new_actions_raw
+    ]
+
+    # Update stored report_data JSON
+    updated_report_json = None
+    if report_data_raw:
+        try:
+            r_dict = json.loads(report_data_raw) if isinstance(report_data_raw, str) else dict(report_data_raw)
+            r_dict["contact_attempts"] = new_attempts
+            r_dict["first_contact_date"] = new_first_date
+            r_dict["recommended_actions"] = [a.dict() for a in new_actions]
+            updated_report_json = json.dumps(r_dict)
+        except Exception as exc:
+            log.warning("Could not update embedded report_data JSON for contact: %s", exc)
+
+    if pool is not None:
+        async with pool.acquire() as conn:
+            if updated_report_json:
+                await conn.execute(
+                    "UPDATE analyses_history SET contact_attempts = $1, first_contact_date = $2, report_data = $3 WHERE id = $4 AND org_id = $5",
+                    new_attempts, new_first_date, updated_report_json, report_id, org_id
+                )
+            else:
+                await conn.execute(
+                    "UPDATE analyses_history SET contact_attempts = $1, first_contact_date = $2 WHERE id = $3 AND org_id = $4",
+                    new_attempts, new_first_date, report_id, org_id
+                )
+    else:
+        conn = get_sqlite_connection()
+        try:
+            cursor = conn.cursor()
+            if updated_report_json:
+                cursor.execute(
+                    "UPDATE analyses_history SET contact_attempts = ?, first_contact_date = ?, report_data = ? WHERE id = ? AND org_id = ?",
+                    (new_attempts, new_first_date, updated_report_json, report_id, org_id)
+                )
+            else:
+                cursor.execute(
+                    "UPDATE analyses_history SET contact_attempts = ?, first_contact_date = ? WHERE id = ? AND org_id = ?",
+                    (new_attempts, new_first_date, report_id, org_id)
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    return ContactActionResponse(
+        report_id=report_id,
+        contact_attempts=new_attempts,
+        first_contact_date=new_first_date,
+        recommended_actions=new_actions,
+    )
+
+
+class NegotiateRequest(BaseModel):
+    clause_text: str = Field(..., description="Offending contractual clause text to rewrite")
+    buyer_name: Optional[str] = Field("Buyer Enterprise", description="Name of buyer")
+    contract_value: Optional[float] = Field(1500000.0, description="Estimated contract value")
+
+
+@app.post("/api/negotiate", response_model=List[NegotiationRecommendation], tags=["Core Product"])
+async def negotiate_clause_endpoint(
+    req: NegotiateRequest,
+    user: UserContext = Depends(get_current_user),
+):
+    """
+    Pre-signature negotiation advisor.
+    Extracts terms from an isolated clause, identifies statutory violations,
+    and drafts an enforceable, MSME-compliant replacement.
+    """
+    extractor = ClauseExtractor()
+    clauses = extractor.extract_from_text(
+        req.clause_text,
+        buyer_name=req.buyer_name,
+        contract_value=req.contract_value,
+    )
+    recommendations: List[NegotiationRecommendation] = []
+
+    for c in clauses:
+        if c.payment_days is not None and c.payment_days > 45:
+            res = await negotiate_clause(
+                clause_text=c.raw_text,
+                violation_type="payment_cycle",
+                cited_law="MSME Development Act 2006, Section 15",
+            )
+            recommendations.append(NegotiationRecommendation(**res))
+
+        if c.has_penalty_interest is False:
+            res = await negotiate_clause(
+                clause_text=c.raw_text,
+                violation_type="interest_penalty",
+                cited_law="MSME Development Act 2006, Section 16",
+            )
+            recommendations.append(NegotiationRecommendation(**res))
+
+        if c.has_unilateral_cancellation is True:
+            res = await negotiate_clause(
+                clause_text=c.raw_text,
+                violation_type="unilateral_cancellation",
+                cited_law="Indian Contract Act 1872 / Unfair Terms",
+            )
+            recommendations.append(NegotiationRecommendation(**res))
+
+    # If no specific violations flagged, provide an affirmative compliant clause confirmation
+    if not recommendations:
+        recommendations.append(
+            NegotiationRecommendation(
+                original_clause=req.clause_text,
+                violation_type="compliant",
+                cited_law="MSMED Act 2006",
+                compliant_replacement=req.clause_text,
+                risk_explanation="Clause conforms to statutory guidelines or does not contain restricted delayed payment terms.",
+                confidence=0.90,
+            )
+        )
+
+    return recommendations
+
 
 
 # --------------------------------------------------------------------------
