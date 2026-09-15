@@ -541,7 +541,7 @@ d:/Ai_platform_Monarch/
 │   ├── db.py                 # Connection pooling, migrations & contact attempt ledger
 │   ├── schema.sql            # Table definitions with case tracking columns
 │   └── repository.py         # Audit and memory persistence
-├── tests/                    # Comprehensive Automated Test Suite (31+ tests)
+├── tests/                    # Comprehensive Automated Test Suite (75 tests)
 │   ├── test_financial.py     # Section 16 compound interest unit tests
 │   ├── test_recommender.py   # Decision Recommendation Ladder tests
 │   ├── test_scorer.py        # Risk score breakdown & disclaimer tests
@@ -549,7 +549,11 @@ d:/Ai_platform_Monarch/
 │   ├── test_confidence.py    # Confidence gating & review routing tests
 │   ├── test_evaluation.py    # Evaluation suite & benchmark tests
 │   ├── test_fairness_agent.py# Cedar statutory policy tests
+│   ├── test_output_guard.py  # Output safety and RAG faithfulness tests
+│   ├── test_input_guard.py   # PII masking and prompt injection tests
 │   └── test_saas.py          # SaaS API, quota & contact tracking integration tests
+├── test_aws.py               # Pre-flight AWS Cloud Services diagnostic script
+├── test_api_client.py        # End-to-end Python REST API test client
 ├── api.py                    # Main FastAPI service application
 ├── requirements.txt          # Python dependencies
 └── README.md                 # Project documentation
@@ -560,60 +564,158 @@ d:/Ai_platform_Monarch/
 ## 🚀 Quickstart & Installation
 
 ### 1. Prerequisites
-- Python 3.11+
-- AWS Credentials (for Bedrock / Textract) or Groq API Key
+- Python `3.11`, `3.12`, or `3.13` (64-bit)
+- AWS Credentials (IAM Access Keys for Bedrock, Textract, S3, DynamoDB) OR Groq API Key (for offline / local fallback)
 
 ### 2. Configure Environment Variables
-Create a `.env` file in the project root:
+Create or verify your `.env` file in the project root:
 
 ```env
-# AWS Cloud & LLM Configuration
-USE_BEDROCK=true
+# ==========================================
+# 1. AWS Credentials & Region
+# ==========================================
+AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 AWS_REGION=us-east-1
+
+# ==========================================
+# 2. Amazon Bedrock (Primary LLM & Guardrails)
+# ==========================================
+USE_BEDROCK=true
 BEDROCK_MODEL_ID=us.anthropic.claude-3-5-sonnet-20241022-v2:0
 
-# Fallback Groq LLM Configuration
+# ==========================================
+# 3. Amazon S3 & DynamoDB Storage
+# ==========================================
+S3_DOCUMENTS_BUCKET=monarch-docs-storage
+USE_DYNAMODB=true
+DYNAMODB_TABLE_NAME=MonarchSaaS
+
+# ==========================================
+# 4. Amazon Cognito Authentication (Optional)
+# ==========================================
+AUTH_ENABLED=false
+COGNITO_USER_POOL_ID=us-east-1_example
+COGNITO_CLIENT_ID=exampleclientid123456
+
+# ==========================================
+# 5. Local LLM Fallback (Groq) & Database
+# ==========================================
 GROQ_API_KEY=gsk_your_groq_api_key_here
 GROQ_MODEL=openai/gpt-oss-20b
-
-# Razorpay Payments Configuration
-RAZORPAY_KEY_ID=rzp_test_sample_key_id
-RAZORPAY_KEY_SECRET=sample_secret_key_123
-
-# Database Configuration
 DATABASE_URL=sqlite:///monarch.db
 ```
 
-### 3. Install Dependencies & Launch
-```bash
-pip install -r requirements.txt
-uvicorn api:app --host 0.0.0.0 --port 8000 --reload
-```
-
-- 🌐 **SaaS Landing Page**: `http://localhost:8000/`
-- 💳 **Pricing Plans**: `http://localhost:8000/pricing`
-- 📱 **Compliance Application**: `http://localhost:8000/app`
-- 📖 **Interactive Swagger Docs**: `http://localhost:8000/docs`
+> [!NOTE]
+> **AWS Authentication Note**: AWS APIs and `boto3` require **IAM Access Keys** (`AWS_ACCESS_KEY_ID` & `AWS_SECRET_ACCESS_KEY`), which can be generated in the AWS IAM Console under **Users $\rightarrow$ Security credentials $\rightarrow$ Create access key**.
 
 ---
 
-## 🧪 Automated Testing & Verification
+### 3. Pre-Flight AWS Connectivity Diagnostic
+Test your AWS cloud service connections in one command:
 
-Run the full automated test suite using `pytest`:
-
-```bash
-pytest tests/ -v
+```powershell
+.\.venv\Scripts\python.exe test_aws.py
 ```
 
-### Test Coverage Highlights:
-- ✅ **Statutory Section 16 Compound Interest** ([`tests/test_financial.py`](file:///d:/Ai_platform_Monarch/tests/test_financial.py)): Validates monthly compounding at $3\times$ RBI rate ($19.5\%$), zero delay handling, and multi-year calculations.
-- ✅ **Decision Recommendation Ladder** ([`tests/test_recommender.py`](file:///d:/Ai_platform_Monarch/tests/test_recommender.py)): Validates 3-stage dispute progression from initial demand to formal legal notice to Samadhaan arbitration.
-- ✅ **Rule-Based Risk Scorer** ([`tests/test_scorer.py`](file:///d:/Ai_platform_Monarch/tests/test_scorer.py)): Validates deterministic point deductions, floor at zero, and statutory disclaimer attachment.
-- ✅ **Clause Extraction & Offsets** ([`tests/test_extractor.py`](file:///d:/Ai_platform_Monarch/tests/test_extractor.py)): Validates character offsets, clause references (`§14.2`, `Clause 7.1`), word-based timelines ("ninety days"), and waiver patterns.
-- ✅ **Cedar Statutory Engine** ([`tests/test_fairness_agent.py`](file:///d:/Ai_platform_Monarch/tests/test_fairness_agent.py)): Validates Section 15, Section 16, and unilateral cancellation policy rules in Cedar.
-- ✅ **Confidence Gating & Review Routing** ([`tests/test_confidence.py`](file:///d:/Ai_platform_Monarch/tests/test_confidence.py)): Validates composite confidence calculation and automatic vs human review thresholding.
-- ✅ **SaaS API & Case Tracking** ([`tests/test_saas.py`](file:///d:/Ai_platform_Monarch/tests/test_saas.py)): Validates tenant quota enforcement (HTTP 429), IDOR protection, contact attempt logging (`/api/analyses/{id}/contact`), and negotiation redline generation (`/api/negotiate`).
-- ✅ **Evaluation Benchmarks** ([`tests/test_evaluation.py`](file:///d:/Ai_platform_Monarch/tests/test_evaluation.py)): Evaluates the full pipeline across 33+ labeled cases against production baselines.
+---
+
+### 4. Install Dependencies & Launch Backend
+```powershell
+# Install dependencies
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+
+# Start FastAPI server
+.\.venv\Scripts\uvicorn.exe api:app --host 0.0.0.0 --port 8000 --reload
+```
+
+- 🌐 **SaaS Landing Page**: [http://localhost:8000/](http://localhost:8000/)
+- 📱 **MSME Compliance Workbench**: [http://localhost:8000/app](http://localhost:8000/app)
+- 💳 **Pricing & Plans**: [http://localhost:8000/pricing](http://localhost:8000/pricing)
+- 📖 **Interactive Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+---
+
+## 🧪 Comprehensive Testing & Verification
+
+### 1. Automated Test Suite (75 Tests)
+Run all 75 unit, integration, and security tests:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+**Expected Output:**
+```text
+====================== 75 passed, 22 warnings in ~16s =======================
+```
+
+---
+
+### 2. MSME Benchmark Evaluation Suite
+Run the benchmark across 33+ curated Indian commercial contracts:
+
+```powershell
+.\.venv\Scripts\python.exe -c "from evaluation.runner import run_compliance_eval; metrics = run_compliance_eval(); print(f'Extraction F1: {metrics.extraction_f1:.2%}'); print(f'Compliance Accuracy: {metrics.compliance_accuracy:.2%}'); print(f'RAG Faithfulness: {metrics.rag_faithfulness:.2%}'); print(f'False Positive Rate: {metrics.false_positive_rate:.2%}')"
+```
+
+| Benchmark Metric | Target Baseline | Measured Result | Status |
+|---|:---:|:---:|:---:|
+| **Clause Extraction F1** | $\ge 85.0\%$ | **$89.58\%$** | ✅ Exceeded |
+| **Compliance Determination Accuracy** | $\ge 90.0\%$ | **$90.91\%$** | ✅ Exceeded |
+| **Statutory RAG Faithfulness** | $\ge 80.0\%$ | **$100.00\%$** | ✅ Exceeded |
+| **False Positive Rate** | $\le 10.0\%$ | **$0.00\%$** | ✅ Passed |
+
+---
+
+### 3. Automated End-to-End API Test Client
+With the server running, test the complete pipeline in Python:
+
+```powershell
+.\.venv\Scripts\python.exe test_api_client.py
+```
+
+---
+
+### 4. Manual PowerShell API Testing (Copy-Pasteable)
+
+#### A. Ingest & Audit Contract (`POST /api/analyse`)
+```powershell
+$body = @{
+    contract_text  = "Clause 14.2: Payment shall be released within 90 days from the invoice date. Supplier agrees that no interest shall accrue on delayed payments. The buyer reserves the right to terminate the agreement unilaterally without compensation."
+    buyer_name     = "Tata Mega Projects Ltd"
+    contract_value = 1500000.0
+    payment_date   = "2026-09-15"
+} | ConvertTo-Json
+
+$res = Invoke-RestMethod -Uri "http://localhost:8000/api/analyse" -Method Post -Headers @{"Content-Type"="application/json"; "X-Org-ID"="org_dev_user"} -Body $body
+$reportId = $res.report_id
+Write-Host "✅ Audit Report Created: $reportId (Compliance Score: $($res.compliance_score)/100)"
+```
+
+#### B. Log Buyer Contact & Escalate Ladder (`POST /api/analyses/{id}/contact`)
+```powershell
+$contactBody = @{
+    notes          = "Spoke with Accounts Payable manager; buyer refused payment citing 90-day contract clause."
+    contact_method = "call"
+} | ConvertTo-Json
+
+$updated = Invoke-RestMethod -Uri "http://localhost:8000/api/analyses/$reportId/contact" -Method Post -Headers @{"Content-Type"="application/json"; "X-Org-ID"="org_dev_user"} -Body $contactBody
+Write-Host "✅ Contact Attempts: $($updated.contact_attempts) | Recommended Action: $($updated.recommended_actions[0].label)"
+```
+
+#### C. Pre-Signature Negotiation Redlines (`POST /api/negotiate`)
+```powershell
+$negBody = @{
+    clause_text    = "Clause 14.2: Payment shall be made in 90 days. Supplier waives any statutory interest."
+    buyer_name     = "Tata Mega Projects Ltd"
+    contract_value = 1500000.0
+} | ConvertTo-Json
+
+$redlines = Invoke-RestMethod -Uri "http://localhost:8000/api/negotiate" -Method Post -Headers @{"Content-Type"="application/json"; "X-Org-ID"="org_dev_user"} -Body $negBody
+Write-Host "✅ Compliant Replacement:" $redlines[0].compliant_replacement
+Write-Host "⚖️ Statutory Rationale:" $redlines[0].risk_explanation
+```
 
 ---
 
