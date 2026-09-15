@@ -97,7 +97,7 @@ async def get_user_org(user: Any) -> Tuple[str, str]:
 async def _provision_personal_org(user_id: str, email: Optional[str] = None) -> Tuple[str, str]:
     """Auto-create a free personal org for a new user on first analysis."""
     clean_user_id = user_id.replace("-", "_")
-    org_id = f"org_{clean_user_id[:8]}" if not user_id.startswith("org_") else str(uuid.uuid4())
+    org_id = f"org_{clean_user_id}_{uuid.uuid4().hex[:4]}" if not user_id.startswith("org_") else str(uuid.uuid4())
     email_clean = email or f"{user_id}@wemboo.internal"
     workspace_name = f"{email_clean.split('@')[0]}'s Workspace"
 

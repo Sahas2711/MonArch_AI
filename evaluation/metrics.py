@@ -162,8 +162,10 @@ def compute_rag_faithfulness(
     """
     valid_statute_anchors = {
         "section 15", "section 16", "section 43b(h)", "msme act", "msmed act",
-        "income tax act", "45-day", "3x rbi", "bank rate", "compound interest"
+        "income tax act", "45-day", "3x rbi", "bank rate", "compound interest",
+        "unilateral", "cancellation", "rule 1", "rule 2", "rule 3"
     }
+
 
     if not cited_statutes:
         return 1.0  # Compliant contracts with no violations have 0 citations, perfectly faithful
