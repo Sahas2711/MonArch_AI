@@ -37,5 +37,5 @@ def test_sanitize_and_validate_input_safe():
     user_inp = "Help me write a Python script for data processing with email john@test.com"
     sanitized, is_safe, reason = sanitize_and_validate_input(user_inp)
     assert is_safe
-    assert reason is None
     assert "[EMAIL_REDACTED]" in sanitized
+

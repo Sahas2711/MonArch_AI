@@ -204,7 +204,9 @@ def test_quota_enforcement_and_pluralization(api_client):
     from middleware.quota import check_quota, log_usage_event, get_user_org
     import asyncio
 
-    test_user = UserContext(user_id="quota_test_user_777", email="quota@test.com", role="user")
+    import uuid
+    dynamic_user_id = f"quota_test_{uuid.uuid4().hex[:6]}"
+    test_user = UserContext(user_id=dynamic_user_id, email=f"{dynamic_user_id}@test.com", role="user")
 
     async def run_quota_test():
         org_id, plan = await get_user_org(test_user)
