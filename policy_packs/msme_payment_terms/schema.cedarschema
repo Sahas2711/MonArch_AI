@@ -1,0 +1,13 @@
+entity Clause {
+  paymentDays: Long,
+  hasPenaltyInterestClause: Bool,
+  hasUnilateralCancellation: Bool,
+  buyerType: String,
+};
+
+entity Evaluation {};
+
+action "flag" appliesTo {
+  principal: [Evaluation],
+  resource: [Clause]
+};

@@ -15,7 +15,7 @@ class GuardrailConfig(BaseModel):
 
 
 @llm_retry()
-def verify_rag_faithfulness(user_inp: str, context: str, output: str) -> Tuple[bool, str]:
+async def verify_rag_faithfulness(user_inp: str, context: str, output: str) -> Tuple[bool, str]:
     """
     Checks if output is strictly grounded in retrieved context.
     Returns (is_faithful, explanation).
@@ -34,7 +34,7 @@ def verify_rag_faithfulness(user_inp: str, context: str, output: str) -> Tuple[b
     user_payload = f"USER QUERY: {user_inp}\n\nCONTEXT:\n{context}\n\nPROPOSED ANSWER:\n{output}"
 
     try:
-        res = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_payload)])
+        res = await llm.ainvoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_payload)])
         content = res.content.strip()
         lines = [line.strip() for line in content.split("\n") if line.strip()]
 

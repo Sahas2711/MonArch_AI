@@ -1,225 +1,355 @@
-The $0–$5/month AWS Stack (Cost-Optimized)
+Add 5 "Smoothness B" Features to Vasooli/Wemboo
+Goal: Add Risk Score, Decision Recommendation, Evidence Panel improvements, Financial Impact Calculator, and Negotiation Recommendation — all built from existing data/logic, no new infrastructure or models.
+
+Proposed Changes
+Component 1 — Risk Score (Rule-Based)
+Replaces the current opaque weighted scorer with a transparent, defensible deduction model that labels itself correctly.
+
+[MODIFY] 
+scorer.py
+Current state: ComplianceScorer.calculate_score() uses WEIGHTS dict (payment_cycle=35, interest_penalty=30, tax_disallowance=20, unilateral_cancellation=15) and simple interest math. The weights silently sum to 100 and there's no per-deduction rationale or evidence confidence factor.
+
+Changes:
+
+Replace WEIGHTS with a new RISK_DEDUCTIONS dict matching the user's spec:
+python
+
+RISK_DEDUCTIONS = {
+    "payment_days_breach":        (35, "Payment-term breach is weighted highest because it's the statute's core protection"),
+    "no_penalty_interest_clause":  (20, "Missing penalty interest removes the statutory deterrent against delayed payments"),
+    "unilateral_cancellation":     (15, "One-sided cancellation exposes the MSME to uncompensated losses"),
+    "low_evidence_confidence":     (10, "Low extraction confidence means the determination may be unreliable"),
+}
+Add a new RiskScoreBreakdown Pydantic model with deduction_name, points_deducted, rationale, triggered fields.
+Rework calculate_score() to:
+Start at 100
+Deduct 35 if payment_days > 45
+Deduct 20 if no_penalty_interest_clause (any clause has has_penalty_interest == False)
+Deduct 15 if unilateral_cancellation detected
+Deduct 10 if average extraction confidence < 0.7
+max(score, 0)
+Return full breakdown list (which deductions fired and which didn't)
+Map score to color band: ≥70 → green/low, 40–69 → amber/medium, <40 → red/high-critical
+Keep existing ComplianceScore model but add breakdown_items: List[RiskScoreBreakdown] and score_disclaimer: str (hardcoded to "Calculated from flagged statutory violations — not a probability estimate.")
+Rename score field description from "Overall compliance score" to "Compliance Risk Score (Rule-Based Risk Index)"
+[MODIFY] 
+schemas.py
+Add to AnalysisReport:
+
+python
+
+risk_score_breakdown: Optional[List[dict]] = Field(None, description="Per-deduction breakdown of the Compliance Risk Score")
+risk_score_disclaimer: str = Field(
+    "Calculated from flagged statutory violations — not a probability estimate.",
+    description="Mandatory labeling disclaimer for the risk score"
+)
+[MODIFY] 
+api.py
+ — analyse_contract endpoint (~line 695–710)
+After scorer.calculate_score(), propagate the new breakdown_items and score_disclaimer into the AnalysisReport constructor.
+
+Component 2 — Decision Recommendation (A/B/C Ladder)
+A fixed if/elif decision tree, not a model. Needs only two new fields on the case record: contact_attempts and first_contact_date.
+
+[NEW] 
+recommender.py
+New module with:
+
+python
+
+@dataclass
+class RecommendedAction:
+    action_id: str          # "send_demand" | "formal_notice" | "file_samadhaan"
+    label: str              # "Send Payment Demand" | "Formal Legal Notice" | "File MSEFC/Samadhaan Complaint"
+    effort_level: str       # "low" | "medium" | "high"
+    is_recommended: bool
+    reason: str             # "Recommended because no prior contact has been made."
+    escalation_order: int   # 1, 2, 3
+class DecisionRecommender:
+    def recommend(self, has_violations: bool, contact_attempts: int,
+                  first_contact_date: Optional[date], current_date: Optional[date] = None
+    ) -> List[RecommendedAction]:
+Logic (exactly as user specified):
+
+contact_attempts == 0 → recommend "Send Payment Demand"
+contact_attempts > 0 and days_since_first_contact < 30 → recommend "Formal Legal Notice"
+contact_attempts > 0 and days_since_first_contact >= 30 → recommend "File MSEFC/Samadhaan Complaint"
+Always returns all 3 options with is_recommended=True on exactly one.
+
+[MODIFY] 
+schemas.py
+Add new schemas:
+
+python
+
+class RecommendedActionSchema(BaseModel):
+    action_id: str
+    label: str
+    effort_level: str
+    is_recommended: bool
+    reason: str
+    escalation_order: int
+class CaseTrackingFields(BaseModel):
+    contact_attempts: int = 0
+    first_contact_date: Optional[str] = None
+Add to AnalysisReport:
+
+python
+
+recommended_actions: Optional[List[RecommendedActionSchema]] = None
+contact_attempts: int = Field(0, description="Number of contact attempts made for this case")
+first_contact_date: Optional[str] = Field(None, description="ISO date of first contact attempt")
+[MODIFY] 
+db.py
+ — init_sqlite_db()
+Add two columns to analyses_history:
+
+sql
+
+ALTER TABLE analyses_history ADD COLUMN contact_attempts INTEGER DEFAULT 0;
+ALTER TABLE analyses_history ADD COLUMN first_contact_date TEXT;
+(Wrapped in try/except for idempotency since SQLite ALTER TABLE doesn't support IF NOT EXISTS.)
+
+[MODIFY] 
+schema.sql
+ — analyses_history table
+Add:
+
+sql
+
+contact_attempts   INTEGER NOT NULL DEFAULT 0,
+first_contact_date TIMESTAMPTZ
+[MODIFY] 
+api.py
+In analyse_contract (~line 695): call DecisionRecommender.recommend(...) with initial contact_attempts=0 and attach to report.
+New endpoint POST /api/analyses/{report_id}/contact — increments contact_attempts, sets first_contact_date on first call, re-runs DecisionRecommender, and returns updated recommendation. This is the "mark as sent" button handler.
+Component 3 — Evidence Panel (Backend Improvements)
+ViolationItem already has the right fields. The gap is: start_char/end_char are never populated, and there's no page_number or clause_reference.
+
+[MODIFY] 
+extractor.py
+In all three extraction helpers (_extract_payment_terms, _extract_interest_terms, _extract_cancellation_terms):
+
+Actually populate start_char and end_char from match.start() / match.end() (the regex match objects are already available but their offsets are discarded).
+Add a simple page estimation heuristic: page_number = (start_char // avg_chars_per_page) + 1 where avg_chars_per_page ≈ 3000 (reasonable for A4 text). This is a rough estimate for plain-text; for actual PDFs ingested via Textract, Textract already returns page numbers which should be threaded through.
+Extract clause reference (e.g., "§14.2", "Clause 7.1") via a new regex pattern:
+python
+
+CLAUSE_REF_PATTERN = r'(?:clause|section|article|§)\s*(\d+(?:\.\d+)*)'
+Search near the matched region and attach as clause_reference on ExtractedClause.
+[MODIFY] 
+schemas.py
+ — EvidenceItem
+Add:
+
+python
+
+page_number: Optional[int] = Field(None, description="Estimated or Textract-derived page number in source document")
+clause_reference: Optional[str] = Field(None, description="Contract clause reference (e.g. §14.2, Clause 7.1)")
+[MODIFY] 
+schemas.py
+ — ExtractedClause (in pipeline/extractor.py)
+Add:
+
+python
+
+page_number: Optional[int] = Field(None, description="Estimated page number")
+clause_reference: Optional[str] = Field(None, description="Clause/section reference identifier")
+[MODIFY] 
+api.py
+ — analyse_contract
+When constructing ViolationItem objects (~lines 530–680), propagate start_char, end_char, page_number, and clause_reference from the matched ExtractedClause into the EvidenceItem.
+
+Component 4 — Financial Impact Calculator (Compound Interest)
+This is the one correctness-critical item. Section 16 mandates compound interest with monthly rests at 3× RBI bank rate.
+
+[NEW] 
+financial.py
+New standalone module:
+
+python
+
+def month_diff(start: date, end: date) -> int:
+    """Exact number of complete calendar months between two dates."""
+    return (end.year - start.year) * 12 + (end.month - start.month)
+def calculate_statutory_interest(
+    principal: float,
+    due_date: date,
+    payment_date: date,
+    rbi_rate: float = 6.5
+) -> StatutoryInterestResult:
+    """
+    Section 16 MSMED Act 2006: compound interest with monthly rests
+    at 3× RBI bank rate from due_date to payment_date.
+    """
+    monthly_rate = (3 * rbi_rate) / 12 / 100
+    months_overdue = month_diff(due_date, payment_date)
+    interest = principal * ((1 + monthly_rate) ** months_overdue - 1)
+    return StatutoryInterestResult(
+        principal=principal,
+        due_date=due_date,
+        payment_date=payment_date,
+        delay_days=(payment_date - due_date).days,
+        months_overdue=months_overdue,
+        rbi_bank_rate=rbi_rate,
+        statutory_rate=3 * rbi_rate,
+        monthly_rate=round(monthly_rate * 100, 4),
+        interest_amount=round(interest, 2),
+        total_recoverable=round(principal + interest, 2),
+    )
+StatutoryInterestResult is a Pydantic model with all breakdown fields for the UI display.
+
 IMPORTANT
 
-This is the core insight: you do NOT need Aurora, OpenSearch, or ElastiCache. Those services cost $30-100+/month each. Instead, use EC2 free tier + services that are genuinely free.
+Verification requirement: Before trusting this function, I will write a unit test with a hand-calculated example. For instance: ₹10,00,000 principal, 90 days overdue (3 months), RBI rate 6.5% → monthly rate = (3 × 6.5) / 12 / 100 = 0.01625 → interest = 10,00,000 × ((1.01625)³ − 1) = ₹49,565.86. The test will assert this exact value.
 
-What You'll Use
-Mermaid diagram
-Cost Breakdown
-AWS Service	What For	Free Tier	Your Cost
-EC2 t3.micro	Monarch API server	750 hrs/month (12 months)	$0
-EBS	20GB gp3 volume (SQLite + FAISS index)	30 GB free	$0
-S3	Document storage + frontend hosting	5 GB + 20K GETs	$0
-CloudFront	CDN for frontend	1 TB transfer/month	$0
-SSM Parameter Store	API keys (Standard tier)	Free forever	$0
-CloudWatch	Logs + basic metrics	5 GB logs + 10 metrics	$0
-Amazon Bedrock	LLM calls (Claude/Llama)	None — pay per token	$2–5 depending on usage
-Cognito	User auth	50,000 MAU free	$0
-ECR	Docker image store	500 MB free	$0
-TOTAL	$0–5/month
-TIP
+[MODIFY] 
+scorer.py
+Replace the simple interest line (contract_value * daily_interest_rate * effective_delay_days) with a call to calculate_statutory_interest() from the new financial.py, using sensible defaults for due_date (today - delay_days) and payment_date (today).
 
-Alternative to Bedrock: Keep using Groq (free API with rate limits). The judges want to see AWS architecture, not necessarily AWS LLMs. You can use Groq for LLM calls and AWS for everything else. This drops cost to literally $0.
+[MODIFY] 
+api.py
+ — analyse_contract
+Replace the inline interest calculations (~lines 540, 580) with calls to calculate_statutory_interest().
+Add financial_breakdown field to the response containing the full StatutoryInterestResult for the UI's "wow" screen.
+[MODIFY] 
+schemas.py
+ — FinancialImpact
+Add detailed breakdown fields:
 
-🏆 Winning Strategy: Target All 3 Tracks
-Track 1: "Build It" — Open-source AWS Stack
-The hackathon specifically calls out: Strands, Cedar, SAM Local, PartyRock, OpenSearch.
+python
 
-Your angle: Monarch uses open-source AWS technologies:
+months_overdue: Optional[int] = Field(None, description="Complete calendar months of overdue payment")
+monthly_compound_rate: Optional[float] = Field(None, description="Monthly compound interest rate applied (%)")
+rbi_bank_rate: Optional[float] = Field(None, description="RBI bank rate used for calculation")
+principal_amount: Optional[float] = Field(None, description="Invoice/contract principal amount")
+total_recoverable: Optional[float] = Field(None, description="Principal + compound interest = total claim")
+calculation_method: str = Field("compound_monthly_rests", description="Interest compounding method used")
+[NEW] 
+test_financial.py
+Unit tests:
 
-✅ Amazon OpenSearch (can run locally via Docker for Build It track)
-✅ AWS SAM for Lambda-based code sandbox
-✅ AWS CDK/CloudFormation for Infrastructure-as-Code
-Track 2: "Ship It" — Deployed Live on AWS
-"Architecture is a key part of the scoring"
+Hand-calculated compound interest: ₹10,00,000, 3 months overdue, RBI 6.5% → ₹49,565.86 interest
+Zero delay: 0 months → ₹0 interest
+Edge case: same due_date and payment_date → ₹0
+Large delay: 12 months overdue → verify against manual calculation
+month_diff correctness: various date pairs
+Component 5 — Negotiation Recommendation (Pre-Signature Clause Rewrite)
+Reuse the existing action agent's clause-drafting logic with a different entry point and framing.
 
-Your angle: Full production deployment:
+[MODIFY] 
+action.py
+Add a new function negotiate_clause(clause_text: str, violation_type: str, cited_law: str) -> str that:
 
-EC2 running Monarch API with persistent storage
-S3 + CloudFront serving the frontend
-CloudWatch observability dashboard
-Health check endpoint with uptime monitoring
-Architecture diagram in README (judges love this)
-Track 3: "Best UI"
-Your angle: The existing web workbench is decent. Polish it into a beautiful, streaming, responsive UI.
+Uses the same Strands agent / LLM fallback pattern as action_node
+But with a different prompt template framed for pre-signature review:
 
-📋 Prep Week Plan (Now → Sept 16)
-These are learning and design tasks. No hackathon code.
+"You are reviewing a contract clause BEFORE signing. Rewrite this clause to be MSME-compliant.
+ Original clause: {clause_text}
+ Violation: {violation_type} under {cited_law}
+ Provide: 1) The compliant replacement clause, 2) One sentence explaining why the original is risky."
+Returns a NegotiationResult with original_clause, compliant_replacement, risk_explanation
+[MODIFY] 
+schemas.py
+Add:
 
-Day 1–2: AWS Setup & Learning
- Create/verify AWS account with Free Tier
- Create AWS Builder Center profile (required for hackathon)
- Learn EC2 basics: launch a t3.micro, SSH in, install Python
- Learn S3: create a bucket, enable static hosting
- Learn CloudFront: set up distribution pointing to S3
- Learn SSM Parameter Store: store a test secret, retrieve with boto3
- Learn CloudWatch: view EC2 metrics, create a basic dashboard
-Day 3–4: Practice Deploying a FastAPI App to EC2
- Practice: deploy a bare FastAPI "hello world" to EC2
- Practice: set up Nginx as reverse proxy on EC2
- Practice: install Docker on EC2, run a container
- Practice: persist a SQLite file on EBS (survives container restart)
- Practice: FAISS index.save() / index.load() to persist vector store to disk
- Practice: use boto3 to upload/download from S3
-Day 5–6: Architecture Design & Templates
- Draw final architecture diagram (Mermaid + image export)
- Write deployment scripts (shell scripts for EC2 setup)
- Design the polished UI wireframes (for Best UI track)
- Prepare .env.example template with all AWS config variables
- Write a README skeleton (architecture, features, setup instructions)
-Day 7: Rest + Review
- Review all AWS service limits
- Make sure you can launch an EC2 instance in < 5 minutes
- Verify Groq API key is working
- Verify AWS Builder Center profile is complete
-🚀 Hackathon Execution Plan (Sept 17–20)
-Day 1 (Sept 17, Thursday) — Foundation Sprint
-Morning (4h):
+python
 
- Initialize fresh repo, commit empty project structure
- Build Agents/state.py — LangGraph State schema
- Build utils/config.py — Groq/Bedrock LLM init + SSM Parameter Store integration
- Build Agents/router.py — Orchestrator with structured output routing
- Build Agents/planner.py — General reasoning agent
- Build Agents/research.py — Web search agent (DuckDuckGo)
-Afternoon (4h):
+class NegotiationRecommendation(BaseModel):
+    original_clause: str
+    violation_type: str
+    cited_law: str
+    compliant_replacement: str
+    risk_explanation: str
+    confidence: float
+Add to AnalysisReport:
 
- Build RAG/manager.py — FAISS + BM25 hybrid RAG with disk persistence (faiss.write_index())
- Build RAG/retriever.py — RRF fusion
- Build Agents/rag.py — Document RAG agent
- Build Agents/graph.py — LangGraph workflow with reflection loop
- Build Agents/reflection.py — Self-correction critic node
-Evening (2h):
+python
 
- Build guardrails/input_guard.py — PII masking + injection defense
- Build guardrails/output_guard.py — RAG faithfulness check
- Build api.py — FastAPI with all endpoints (/api/chat, /api/ingest, /api/health, /api/memories)
- Test everything locally — should work end to end
-Day 2 (Sept 18, Friday) — AWS Deployment + Advanced Features
-Morning (4h):
+negotiation_recommendations: Optional[List[NegotiationRecommendation]] = None
+[MODIFY] 
+api.py
+ — analyse_contract
+After building violations, call negotiate_clause() for each violation that has a draft_counter_clause and attach results as negotiation_recommendations on the report. This reuses the existing draft_counter_clause data as a deterministic fallback, with the LLM providing enhanced framing.
 
- Build SQL/db.py + SQL/repository.py — SQLite persistence on EBS
- Build SQL/memory_consolidator.py — Background fact distillation
- Add SSE streaming endpoint: POST /api/chat/stream
- Add S3 document upload integration (raw docs stored in S3, chunks in FAISS)
-Afternoon (4h):
+[NEW endpoint] 
+api.py
+ — POST /api/negotiate
+New endpoint that accepts a single clause text + context and returns a NegotiationRecommendation. This is the "review before signing" entry point, separate from the full analysis pipeline:
 
- Launch EC2 t3.micro, install dependencies
- Deploy Monarch to EC2 with Nginx reverse proxy
- Set up SSM Parameter Store with all secrets
- Persist FAISS index + SQLite DB on EBS volume
- Set up CloudWatch Logs (pipe uvicorn output to CloudWatch)
- Verify: app is live at http://<EC2-IP>:8000, survives restart
-Evening (2h):
+python
 
- Add Cognito user auth (JWT validation middleware)
- Build MCP/server.py — FastMCP tool server
- Build harness/eval_suite.py — Automated evaluation harness
- Build main.py — CLI entrypoint with all modes
-Day 3 (Sept 19, Saturday) — UI + Architecture Polish
-Morning (4h):
-
- Build beautiful frontend: index.html + static/app.js + static/style.css
-Glassmorphism dark mode ✨
-SSE streaming chat with typewriter effect
-Document upload with drag-and-drop
-Memory inspector sidebar
-Mobile responsive
-Loading animations
- Deploy frontend to S3 + CloudFront
-Afternoon (4h):
-
- Set up CloudWatch Dashboard:
-API latency metrics
-Request count by route
-Error rate
-Memory/CPU utilization
- Add health check monitoring
- Add Agents/vision.py — Groq Vision agent for multimodal
- Run full evaluation harness, fix any failures
-Evening (2h):
-
- Write comprehensive README with:
-Architecture diagram (Mermaid)
-Screenshots of UI
-AWS architecture diagram
-Feature list
-Deployment instructions
-Cost analysis ($0 explanation)
- Create short demo video (2-3 min)
-Day 4 (Sept 20, Sunday) — Final Polish + Submit
-Morning (3h):
-
- Final bug fixes and edge case handling
- Add Dockerfile + docker-compose.yml
- Add deploy.sh — one-command EC2 deployment script
- Add infrastructure diagram to README
- Clean up code: docstrings, type hints, remove debug prints
-Afternoon (2h):
-
- Final testing on live EC2 deployment
- Record final demo video showing:
-Live deployed URL
-Multi-agent routing (planner, research, RAG, vision)
-Document ingestion + retrieval
-Guardrail blocking injection attempts
-Memory distillation
-CloudWatch dashboard
-Architecture diagram
- Submit 🚀
-🏗️ Architecture That Wins "Ship It"
-Mermaid diagram
-This architecture is simple, clean, and cheap — but it covers all the AWS services the judges want to see:
-
-Compute: EC2
-Storage: S3 + EBS
-Security: Cognito + SSM Parameter Store
-Observability: CloudWatch
-CDN: CloudFront
-Networking: VPC, Security Groups
-🔑 Key Technical Changes from Current Codebase
-What Stays the Same (Core Engine)
-Your LangGraph multi-agent architecture, hybrid RAG, reflection loops, and guardrails are excellent. Keep the same design.
-
-What Changes (AWS Integration)
-Current	Hackathon Version	Why
-.env file for secrets	SSM Parameter Store via boto3	AWS-native, judges will check
-SQLite monarch.db (ephemeral in Docker)	SQLite on EBS volume (persists across restarts)	Survive EC2 reboot, $0
-FAISS in-memory only	FAISS with faiss.write_index() to EBS disk	Persist RAG across restarts, $0
-Temp file for ingestion	Upload raw docs to S3 first, then process	Document management, $0
-No auth	Cognito JWT validation	Security, $0
-print() logging	CloudWatch Logs via watchtower library	Observability, $0
-Manual docker run	EC2 deploy script with Nginx	One-command deploy
-No CDN	CloudFront → S3 for frontend	Fast, professional
-What You Should NOT Do
-❌ Aurora PostgreSQL — $30+/month minimum
-❌ OpenSearch Serverless — $25+/month minimum
-❌ ElastiCache — $15+/month minimum
-❌ ECS Fargate — EC2 free tier is better for single-server
-❌ Lambda for main API — cold start makes chat unusable
-❌ API Gateway — EC2 + Nginx is simpler and free
-💡 Bonus Features to Stand Out
-These are the "wow factor" features that separate winners from participants:
-
-SSE Streaming Chat — Token-by-token typing effect. Every other team will have "loading... done". You'll have smooth real-time streaming.
-
-Live Architecture Dashboard — A /architecture page that shows the Mermaid diagram of what AWS services are being used, with live health status dots.
-
-Cost Calculator — Show a live "This app costs $0.00/month on AWS" badge in the UI. Judges will LOVE this.
-
-CloudWatch Dashboard Screenshot in README — Proves real observability.
-
-One-Command Deploy — ./deploy.sh that sets up the entire EC2 instance from scratch. Shows you understand DevOps.
-
+class NegotiateRequest(BaseModel):
+    clause_text: str
+    buyer_name: Optional[str] = None
+    contract_value: Optional[float] = None
+@app.post("/api/negotiate", tags=["Core Product"])
+async def negotiate_clause_endpoint(req: NegotiateRequest, user: UserContext = Depends(get_current_user)):
+    # 1. Extract clause → 2. Cedar evaluate → 3. For each violation, negotiate_clause()
+    # Returns List[NegotiationRecommendation]
+Summary of All File Changes
+File	Action	Component
+pipeline/scorer.py
+MODIFY	1 (Risk Score) + 4 (use compound interest)
+pipeline/recommender.py
+NEW	2 (Decision Recommendation)
+pipeline/financial.py
+NEW	4 (Financial Calculator)
+pipeline/extractor.py
+MODIFY	3 (Evidence Panel — populate offsets/page/clause ref)
+pipeline/__init__.py
+MODIFY	Export new classes
+models/schemas.py
+MODIFY	1, 2, 3, 4, 5 (new fields + schemas)
+Agents/action.py
+MODIFY	5 (Negotiation — new negotiate_clause())
+api.py
+MODIFY	1, 2, 3, 4, 5 (update analyse, new endpoints)
+SQL/db.py
+MODIFY	2 (add contact_attempts columns)
+SQL/schema.sql
+MODIFY	2 (add contact_attempts columns)
+tests/test_financial.py
+NEW	4 (compound interest unit tests)
+tests/test_scorer.py
+NEW	1 (risk score unit tests)
+tests/test_recommender.py
+NEW	2 (decision ladder unit tests)
 Open Questions
 IMPORTANT
 
-Q1: Is your current Monarch code prior work that you've already pushed to GitHub? If yes, you'll need to start a fresh repo during the hackathon. You can rewrite the same architecture from your knowledge, but the git commits must be within Sept 17–20.
+RBI Bank Rate source: The current code hardcodes 6.5%. Should this remain hardcoded for now, or should we add an env var / config field so it can be updated when RBI changes the rate? (The rate changes ~2-4× per year.)
 
 IMPORTANT
 
-Q2: Do you want to use Groq (free, external API) or Amazon Bedrock (AWS-native, $2-5/month)? Using Bedrock scores higher with judges but costs money. Using Groq is free but isn't an AWS service. My recommendation: Use Groq as primary, add Bedrock as a configurable fallback — best of both worlds.
+Contact tracking scope: The "mark as sent" endpoint (POST /api/analyses/{report_id}/contact) — should it also log an audit event via audit/logger.py, or is simple DB update sufficient for now?
 
 IMPORTANT
 
-Q3: Solo or team? The hackathon allows teams of 1–4. With a team, you can parallelize: one person on backend, one on AWS infra, one on frontend/UI, one on docs/demo video.
+Negotiation endpoint auth: Should POST /api/negotiate count against the org's monthly analysis quota, or should it be treated as a separate (cheaper) quota bucket? It runs less compute than a full analysis.
+
+Verification Plan
+Automated Tests
+bash
+
+# Unit tests for financial calculator (hand-calculated compound interest)
+pytest tests/test_financial.py -v
+# Unit tests for risk score deductions
+pytest tests/test_scorer.py -v
+# Unit tests for decision recommendation ladder
+pytest tests/test_recommender.py -v
+# Full test suite
+pytest tests/ -v --tb=short
+Manual Verification
+Risk Score: Run POST /api/analyse with a 90-day payment clause + no interest + unilateral cancellation → expect score = 100 - 35 - 20 - 15 = 30 (critical/red), with all 3 deductions visible in breakdown
+Decision Ladder: Call POST /api/analyses/{id}/contact twice, verify recommendation escalates from "Send Demand" → "Formal Notice" → (after 30 days) "File Samadhaan"
+Evidence Panel: Verify page_number, clause_reference, start_char, end_char are populated in violation evidence items
+Financial Calculator: Compare ₹15,00,000 × 3 months overdue output against manual Excel calculation
+Negotiation: Call POST /api/negotiate with a violating clause, verify compliant replacement is returned
+Build Verification
+bash
+
+# Ensure API starts cleanly
+python main.py --serve-api
+# Hit health endpoint
+curl http://localhost:8000/api/health

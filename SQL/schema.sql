@@ -73,3 +73,86 @@ CREATE TABLE IF NOT EXISTS chat_summaries (
     up_to_message_id BIGINT NOT NULL,
     updated_at     TIMESTAMPTZ DEFAULT now()
 );
+
+-- =====================================================================
+-- SAAS MULTI-TENANT & BILLING EXTENSIONS (Vasooli / Wemboo)
+-- =====================================================================
+
+-- ORGANIZATIONS (the billing/tenant entity)
+CREATE TABLE IF NOT EXISTS organizations (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                 TEXT NOT NULL,
+    plan                 TEXT NOT NULL DEFAULT 'free'
+                         CHECK (plan IN ('free', 'pro', 'enterprise')),
+    monthly_quota        INTEGER NOT NULL DEFAULT 5,
+    current_usage        INTEGER NOT NULL DEFAULT 0,
+    created_at           TIMESTAMPTZ DEFAULT now(),
+    billing_email        TEXT,
+    razorpay_customer_id TEXT
+);
+
+-- ORG MEMBERS (links users to orgs — org_id derived from JWT, never client input)
+CREATE TABLE IF NOT EXISTS org_members (
+    user_id   TEXT        NOT NULL,   -- Cognito sub / username claim
+    org_id    UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    role      TEXT        NOT NULL DEFAULT 'member'
+              CHECK (role IN ('owner', 'admin', 'member')),
+    joined_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, org_id)
+);
+CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members (user_id);
+
+-- USAGE METERING
+CREATE TABLE IF NOT EXISTS usage_events (
+    id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id     UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id    TEXT        NOT NULL,
+    event_type TEXT        NOT NULL CHECK (event_type IN ('analysis','ingest','chat')),
+    tokens_used INTEGER   DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_usage_org_created ON usage_events (org_id, created_at DESC);
+
+-- API KEYS
+CREATE TABLE IF NOT EXISTS api_keys (
+    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id       UUID        NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    name         TEXT        NOT NULL,
+    key_hash     TEXT        UNIQUE NOT NULL,
+    key_prefix   TEXT        NOT NULL,
+    created_at   TIMESTAMPTZ DEFAULT now(),
+    last_used_at TIMESTAMPTZ,
+    is_active    BOOLEAN     DEFAULT true
+);
+
+-- PLAN LIMITS (seed data)
+CREATE TABLE IF NOT EXISTS plan_limits (
+    plan                TEXT    PRIMARY KEY,
+    analyses_per_month  INTEGER NOT NULL,   -- -1 = unlimited
+    documents_max       INTEGER NOT NULL,
+    chat_messages_month INTEGER NOT NULL,
+    api_access          BOOLEAN DEFAULT false
+);
+
+INSERT INTO plan_limits (plan, analyses_per_month, documents_max, chat_messages_month, api_access)
+VALUES
+    ('free',        5,   10,   100, false),
+    ('pro',        50,  100,  1000, true),
+    ('enterprise', -1,   -1,    -1, true)
+ON CONFLICT (plan) DO NOTHING;
+
+-- CONTRACT AUDIT & ANALYSIS REPORTS
+CREATE TABLE IF NOT EXISTS analyses_history (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    org_id             UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id            TEXT NOT NULL,
+    buyer_name         TEXT NOT NULL,
+    file_name          TEXT,
+    compliance_score   INTEGER NOT NULL,
+    violations_count   INTEGER NOT NULL DEFAULT 0,
+    report_data        JSONB NOT NULL,
+    contact_attempts   INTEGER NOT NULL DEFAULT 0,
+    first_contact_date TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_analyses_org ON analyses_history (org_id, created_at DESC);

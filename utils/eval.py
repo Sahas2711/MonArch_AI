@@ -48,3 +48,12 @@ def run_eval(final_state: dict):
     except Exception as exc:
         log.warning("DeepEval evaluation failed (e.g. rate limit / quota check): %s", exc)
         return {"status": "skipped", "reason": str(exc)}
+
+
+def run_compliance_evaluation(save_report_path: str = "evaluation_report.md"):
+    """
+    Runs the MSME domain compliance evaluation suite across 30+ ground-truth cases.
+    Measures extraction F1, compliance accuracy, and RAG faithfulness against baselines.
+    """
+    from evaluation.runner import run_compliance_eval
+    return run_compliance_eval(save_report_path=save_report_path)

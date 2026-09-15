@@ -1,12 +1,7 @@
 import os
 import sys
-from dotenv import load_dotenv
-from langchain_groq import ChatGroq
-from utils.logger import log
-
 import time
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
 from utils.logger import log
 
 load_dotenv()
@@ -53,6 +48,10 @@ RAW_GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
 UNSTRUCTURED_API_KEY = get_secret("UNSTRUCTURED_API_KEY", "UNSTRUCTURED_API_KEY")
 
+BEDROCK_MODEL_ID = os.getenv("BEDROCK_MODEL_ID", "us.anthropic.claude-3-5-sonnet-20241022-v2:0")
+AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+USE_BEDROCK = os.getenv("USE_BEDROCK", "false").lower() == "true"
+
 # LangSmith Observability setup
 LANGCHAIN_API_KEY = os.getenv("LANGCHAIN_API_KEY") or os.getenv("LANGSMITH_API_KEY")
 LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT") or os.getenv("LANGSMITH_PROJECT") or "Monarch"
@@ -70,10 +69,6 @@ if LANGCHAIN_API_KEY:
 else:
     log.info("LangSmith tracing disabled (LANGCHAIN_API_KEY not set).")
 
-if not GROQ_API_KEY:
-    log.error("GROQ_API_KEY is not set. Copy .env.example to .env and fill it in.")
-    sys.exit(1)
-
 
 def _resolve_model(requested_model: str, api_key: str) -> str:
     """Validate requested model against Groq's active catalog and auto-fallback if deprecated."""
@@ -85,7 +80,6 @@ def _resolve_model(requested_model: str, api_key: str) -> str:
         if requested_model in available:
             return requested_model
 
-        # Priority order for replacements
         preferred = [
             "openai/gpt-oss-20b",
             "openai/gpt-oss-120b",
@@ -104,18 +98,36 @@ def _resolve_model(requested_model: str, api_key: str) -> str:
         chat_models = [m for m in available if "whisper" not in m]
         if chat_models:
             chosen = sorted(chat_models)[0]
-            log.warning(
-                "Model '%s' not available. Selected '%s' from available Groq models: %s",
-                requested_model,
-                chosen,
-                chat_models,
-            )
             return chosen
     except Exception as exc:
         log.warning("Could not query Groq models (%s); proceeding with '%s'", exc, requested_model)
     return requested_model
 
 
-GROQ_MODEL = _resolve_model(RAW_GROQ_MODEL, GROQ_API_KEY)
+def _initialize_llm():
+    """Primary LLM initialization: tries Amazon Bedrock first, falling back to Groq."""
+    if USE_BEDROCK or os.getenv("AWS_ACCESS_KEY_ID"):
+        try:
+            from langchain_aws import ChatBedrockConverse
+            bedrock_llm = ChatBedrockConverse(
+                model=BEDROCK_MODEL_ID,
+                region_name=AWS_REGION,
+                temperature=0.1,
+            )
+            log.info("Initialized Amazon Bedrock primary LLM path with model: %s", BEDROCK_MODEL_ID)
+            return bedrock_llm, BEDROCK_MODEL_ID
+        except Exception as exc:
+            log.warning("Failed to initialize Amazon Bedrock (%s); falling back to Groq.", exc)
 
-llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, timeout=30, max_retries=0)
+    if GROQ_API_KEY:
+        from langchain_groq import ChatGroq
+        groq_model = _resolve_model(RAW_GROQ_MODEL, GROQ_API_KEY)
+        groq_llm = ChatGroq(model=groq_model, api_key=GROQ_API_KEY, timeout=30, max_retries=0)
+        log.info("Initialized Groq LLM path with model: %s", groq_model)
+        return groq_llm, groq_model
+
+    raise RuntimeError("Neither Bedrock nor Groq API key is available for LLM initialization.")
+
+
+llm, ACTIVE_MODEL_NAME = _initialize_llm()
+GROQ_MODEL = ACTIVE_MODEL_NAME
