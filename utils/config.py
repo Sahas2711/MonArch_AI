@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from langchain_groq import ChatGroq
 
 load_dotenv()
 
@@ -15,7 +16,7 @@ UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY", "")
 
 # Optional: LLM keys
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
 
 # Optional: LangChain / LangSmith Observability
 LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
@@ -26,3 +27,6 @@ LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "Monarch")
 # MCP Server
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8001"))
+
+# LLM instance
+llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, timeout=60, max_retries=2)

@@ -2,6 +2,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from Agents.state import State
 from RAG.manager import rag_manager
 from utils.config import llm
+from utils.logger import log
 from utils.retry import llm_retry
 
 
