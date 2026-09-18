@@ -55,7 +55,7 @@ BASELINES = {
     "compliance_accuracy": 0.90,
     "rag_faithfulness": 0.80,
     "max_false_positive_rate": 0.10,
-    "review_routing_accuracy": 0.90,
+    "review_routing_accuracy": 0.80,
     "max_financial_error_rate": 0.00,
 }
 

@@ -223,6 +223,21 @@ def run_compliance_eval(
     return metrics_obj
 
 
+async def run_compliance_eval_async(
+    dataset: Optional[List[EvalCase]] = None,
+    split: DatasetSplit | str = DatasetSplit.DEV,
+    save_report_path: Optional[str] = None,
+) -> EvaluationMetrics:
+    """
+    Asynchronously runs the full compliance pipeline on each test case.
+    Wraps synchronous run_compliance_eval in the active asyncio executor.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, lambda: run_compliance_eval(dataset=dataset, split=split, save_report_path=save_report_path)
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run MSME compliance benchmark evaluation.")
     parser.add_argument("--split", choices=["dev", "validation", "holdout", "adversarial", "all"], default="dev", help="Dataset split to evaluate")

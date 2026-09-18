@@ -7,8 +7,9 @@ and confidence metrics into a single arbitrary number.
 """
 
 from typing import List, Optional
-from vasooli.domain.enums import DecisionOutcome, RecoveryStage, Severity
+from vasooli.domain.enums import DecisionOutcome, FactStatus, FactType, RecoveryStage, Severity
 from vasooli.domain.models import (
+    CategoryConfidence,
     ComplianceScorecard,
     ExtractedFact,
     FinancialCalculation,

@@ -72,7 +72,7 @@ class VasooliOrchestrator:
         report_id = f"REP-{uuid.uuid4().hex[:8]}"
 
         # 1. Input Guardrail
-        sanitized_text = self.prompt_guard.validate_and_sanitize(contract_text, mask_personal_data=False)
+        sanitized_text, _, _ = self.prompt_guard.validate_and_sanitize(contract_text, mask_personal_data=False)
 
         # 2. Fact Extraction
         facts: List[ExtractedFact] = self.fact_extractor.extract_facts(

@@ -114,6 +114,14 @@ class VasooliRepository:
     def _init_db(self) -> None:
         conn = self._get_conn()
         try:
+            cursor = conn.cursor()
+            tables = [r[0] for r in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+            for table in ["evidence_items", "extracted_facts", "policy_decisions", "analyses_v2"]:
+                if table in tables:
+                    cols = [c[1] for c in cursor.execute(f"PRAGMA table_info({table})").fetchall()]
+                    if "tenant_id" not in cols:
+                        cursor.execute(f"ALTER TABLE {table} ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'ORG-DEFAULT'")
+            conn.commit()
             conn.executescript(SQLITE_SCHEMA)
         finally:
             conn.close()
