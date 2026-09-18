@@ -9,11 +9,13 @@ from RAG.manager import rag_manager
 
 from guardrails.input_guard import sanitize_and_validate_input
 
+from SQL.repository import memory_repo
+
 router_llm = llm.with_structured_output(RouteDecision)
 
 
 @llm_retry()
-def _route_decision(user_inp: str) -> RouteDecision:
+async def _route_decision(user_inp: str) -> RouteDecision:
     has_rag_docs = len(rag_manager.all_documents) > 1 or any("Monarch RAG baseline" not in d.page_content for d in rag_manager.all_documents)
     query_lower = user_inp.lower()
     
@@ -40,14 +42,17 @@ def _route_decision(user_inp: str) -> RouteDecision:
         "(news, prices, weather, recent events).\n"
         "Otherwise pick planner for general reasoning, coding, or writing tasks."
     )
-    return router_llm.invoke(
+    return await router_llm.ainvoke(
         [SystemMessage(content=sys_prompt), HumanMessage(content=user_inp)]
     )
 
 
-def orchestrator(state: State) -> dict:
+async def orchestrator(state: State) -> dict:
     raw_input = state["user_inp"]
     sanitized_input, is_safe, reason = sanitize_and_validate_input(raw_input)
+
+    user_id = state.get("user_id")
+    user_memories = memory_repo.get_user_memories(user_id) if user_id else None
 
     if not is_safe:
         log.warning("Orchestrator blocked query via Input Guardrail: %s", reason)
@@ -55,16 +60,21 @@ def orchestrator(state: State) -> dict:
             "route": "planner",
             "output": f"⚠️ Request Blocked by Guardrail: {reason}",
             "user_inp": sanitized_input,
+            "user_memories": user_memories,
         }
+
+    if state.get("extracted_clauses") or "contract" in sanitized_input.lower() or "msme" in sanitized_input.lower() or "fairness" in sanitized_input.lower():
+        log.info("Direct Fairness/Contract route override triggered.")
+        return {"route": "fairness_agent", "user_inp": sanitized_input, "user_memories": user_memories}
 
     if state.get("image_data"):
         log.info("Direct Vision route override triggered (image payload attached).")
-        return {"route": "vision_agent", "user_inp": sanitized_input}
+        return {"route": "vision_agent", "user_inp": sanitized_input, "user_memories": user_memories}
 
-    decision = _route_decision(sanitized_input)
+    decision = await _route_decision(sanitized_input)
     log.info("Routing decision: %s (%s)", decision.agent, decision.reason)
-    return {"route": decision.agent, "user_inp": sanitized_input}
+    return {"route": decision.agent, "user_inp": sanitized_input, "user_memories": user_memories}
 
 
-def route_next_node(state: State) -> Literal["planner", "research_agent", "rag_agent", "vision_agent"]:
+def route_next_node(state: State) -> Literal["planner", "research_agent", "rag_agent", "vision_agent", "fairness_agent", "action_agent"]:
     return state["route"]  # type: ignore[return-value]

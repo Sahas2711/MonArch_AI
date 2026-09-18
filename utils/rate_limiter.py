@@ -7,6 +7,7 @@ Enforces configurable rate limits per client IP address across API routes:
   - General API      : 60 requests per minute
 """
 
+import os
 import time
 from collections import defaultdict
 from typing import Dict, List, Tuple
@@ -16,6 +17,22 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from utils.logger import log
+
+REDIS_URL = os.getenv("REDIS_URL")
+_redis_client = None
+
+
+async def _get_redis():
+    global _redis_client
+    if _redis_client is None and REDIS_URL:
+        try:
+            import redis.asyncio as redis
+
+            _redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+            log.info("Initialized Redis connection for distributed rate limiting.")
+        except Exception as exc:
+            log.warning("Could not connect to Redis (%s). Falling back to in-memory rate limiting.", exc)
+    return _redis_client
 
 
 class RateLimiterMiddleware(BaseHTTPMiddleware):
@@ -32,7 +49,7 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         self.ingest_limit = ingest_limit
         self.default_limit = default_limit
         self.window_seconds = window_seconds
-        # Storage structure: client_ip -> category -> list of timestamps
+        # Fallback in-memory storage structure: client_ip -> category -> list of timestamps
         self._request_history: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
 
     def _get_limit_and_category(self, path: str) -> Tuple[int, str]:
@@ -54,7 +71,35 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         limit, category = self._get_limit_and_category(path)
         now = time.time()
 
-        # Clean timestamps older than window_seconds
+        r = await _get_redis()
+        if r:
+            # Distributed Redis sliding window using sorted sets
+            key = f"rate:{client_ip}:{category}"
+            cutoff = now - self.window_seconds
+            try:
+                pipeline = r.pipeline()
+                pipeline.zremrangebyscore(key, 0, cutoff)
+                pipeline.zcard(key)
+                pipeline.zadd(key, {str(now): now})
+                pipeline.expire(key, self.window_seconds + 5)
+                results = await pipeline.execute()
+
+                count = results[1]
+                if count >= limit:
+                    log.warning("Redis rate limit exceeded for %s on %s (%d/%d)", client_ip, path, count, limit)
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "Rate limit exceeded. Please wait before retrying.", "limit": limit},
+                        headers={"Retry-After": str(self.window_seconds)},
+                    )
+                response = await call_next(request)
+                response.headers["X-RateLimit-Limit"] = str(limit)
+                response.headers["X-RateLimit-Remaining"] = str(max(0, limit - count - 1))
+                return response
+            except Exception as exc:
+                log.warning("Redis rate limiter error (%s); using in-memory fallback.", exc)
+
+        # Fallback: In-memory sliding window
         timestamps = self._request_history[client_ip][category]
         cutoff = now - self.window_seconds
         valid_timestamps = [ts for ts in timestamps if ts > cutoff]
@@ -62,26 +107,13 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
 
         if len(valid_timestamps) >= limit:
             retry_after = int(self.window_seconds - (now - valid_timestamps[0]))
-            log.warning(
-                "Rate limit exceeded for client %s on %s (%d/%d requests used in %ds)",
-                client_ip,
-                path,
-                len(valid_timestamps),
-                limit,
-                self.window_seconds,
-            )
+            log.warning("Rate limit exceeded for client %s on %s", client_ip, path)
             return JSONResponse(
                 status_code=429,
-                content={
-                    "detail": "Rate limit exceeded. Please wait before retrying.",
-                    "limit": limit,
-                    "window_seconds": self.window_seconds,
-                    "retry_after_seconds": max(1, retry_after),
-                },
+                content={"detail": "Rate limit exceeded. Please wait before retrying.", "limit": limit},
                 headers={"Retry-After": str(max(1, retry_after))},
             )
 
-        # Record request timestamp
         self._request_history[client_ip][category].append(now)
 
         response = await call_next(request)

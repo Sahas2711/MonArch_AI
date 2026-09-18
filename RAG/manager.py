@@ -156,4 +156,7 @@ class RAGAgentManager:
         return "\n\n---\n\n".join(d.page_content for d in matching_docs)
 
 
-rag_manager = RAGAgentManager()
+try:
+    rag_manager = RAGAgentManager()
+except Exception as e:
+    rag_manager = None

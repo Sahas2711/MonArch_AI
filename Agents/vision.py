@@ -17,7 +17,7 @@ vision_llm = ChatGroq(model=VISION_MODEL, api_key=GROQ_API_KEY, timeout=40, max_
 
 
 @llm_retry()
-def vision_agent(state: State) -> dict:
+async def vision_agent(state: State) -> dict:
     """Vision agent node analyzing image payloads, charts, diagrams, or visual prompts."""
     user_prompt = state["user_inp"]
     image_data = state.get("image_data")
@@ -26,6 +26,9 @@ def vision_agent(state: State) -> dict:
         "You are an expert multimodal AI vision assistant. Analyze the image or visual document provided "
         "and answer the user's query with extreme detail, precision, and clarity."
     )
+    memories = state.get("user_memories")
+    if memories:
+        sys_prompt += f"\nUser Long-Term Context / Preferences: {', '.join(memories)}"
 
     if image_data:
         # Multimodal payload (Text + Base64 Image or URL)
@@ -39,12 +42,12 @@ def vision_agent(state: State) -> dict:
             },
         ]
         try:
-            response = vision_llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=content_payload)])
+            response = await vision_llm.ainvoke([SystemMessage(content=sys_prompt), HumanMessage(content=content_payload)])
         except Exception as exc:
             log.warning("Vision model %s failed (%s). Falling back to text response.", VISION_MODEL, exc)
-            response = vision_llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_prompt)])
+            response = await vision_llm.ainvoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_prompt)])
     else:
-        response = vision_llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_prompt)])
+        response = await vision_llm.ainvoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_prompt)])
 
     return {
         "output": response.content.strip(),
