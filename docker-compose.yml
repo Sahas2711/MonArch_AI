@@ -1,0 +1,29 @@
+# =====================================================================
+# MONARCH — DOCKER COMPOSE MULTI-CONTAINER STACK
+# Launches FastAPI Backend Service with Multimodal RAG & Database Persistence
+# =====================================================================
+
+services:
+  # -------------------------------------------------------------------
+  # Monarch Multi-Agent FastAPI Application Service
+  # -------------------------------------------------------------------
+  monarch-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: monarch-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+    volumes:
+      - ./monarch.db:/app/monarch.db
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

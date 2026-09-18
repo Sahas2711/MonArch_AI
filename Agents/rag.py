@@ -17,24 +17,14 @@ def rag_agent(state: State) -> dict:
         "If the user asks for a summary, overview, or main points of the paper/document, "
         "provide a clear, structured summary of the main contributions, methods, and findings in the context."
     )
-    try:
-        response = llm.invoke(
-            [
-                SystemMessage(content=sys_prompt),
-                HumanMessage(content=f"Document Context:\n{context}\n\nUser Question: {query}"),
-            ]
-        )
-        content = response.content.strip()
-    except Exception as exc:
-        log.warning("RAG Agent LLM execution fallback triggered due to: %s", exc)
-        content = (
-            f"### RAG Retrieval Analysis\n\n"
-            f"**Question**: {query}\n\n"
-            f"**Retrieved Document Context**:\n{context}\n"
-        )
+    response = llm.invoke(
+        [
+            SystemMessage(content=sys_prompt),
+            HumanMessage(content=f"Document Context:\n{context}\n\nUser Question: {query}"),
+        ]
+    )
     return {
-        "output": content,
+        "output": response.content.strip(),
         "context": context,
-        "messages": [AIMessage(content=content)],
+        "messages": [AIMessage(content=response.content)],
     }
-

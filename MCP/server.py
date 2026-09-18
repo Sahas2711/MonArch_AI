@@ -1,11 +1,6 @@
-# MCP/server.py — FastMCP server exposing MonArch AI tools over Streamable-HTTP
-import ast
-import operator
-import os
-from typing import Optional
-
 from fastmcp import FastMCP
-from utils.config import MCP_HOST, MCP_PORT, MCP_AUTH_TOKEN
+from Agents.research import _search_tool
+from RAG.manager import rag_manager
 from utils.logger import log
 
 # Allowed file extensions for document ingestion
@@ -27,6 +22,24 @@ MAX_QUERY_LENGTH = 4000
 MAX_SEARCH_QUERY_LENGTH = 500
 MAX_CALCULATOR_EXPR_LENGTH = 200
 
+
+def run_mcp_server():
+    """Start FastMCP server exposing Monarch RAG and search tools over streamable-http."""
+    mcp_server = FastMCP("Monarch tools")
+
+    @mcp_server.tool
+    def retriever_tool(query: str, user_id: str = "") -> str:
+        """Retrieve relevant document context for a query."""
+        return rag_manager.retrieve(query, user_id=user_id or None)
+
+    @mcp_server.tool
+    def websearch_tool(query: str) -> str:
+        """Search the web with DuckDuckGo."""
+        return _search_tool.invoke(query)
+
+    log.info("Starting MCP server on http://127.0.0.1:8000/mcp (streamable-http)")
+    mcp_server.run(transport="streamable-http", host="127.0.0.1", port=8000)
+=======
 # Safe AST operators for calculator
 _MATH_OPERATORS = {
     ast.Add: operator.add,

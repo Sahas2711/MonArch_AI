@@ -1,7 +1,29 @@
-venv/
-.venv/
-__pycache__/
-*.pyc
+# Environment and Secret Files
 .env
-faiss_index/
+.env.local
+*.env
+
+# Python Virtual Environments & Caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases & Persisted Local Files
+*.db
+*.sqlite
+*.sqlite3
+monarch.db
+
+# IDE & OS Artifacts
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
+
+# Scratch & Brain Temp Folders
+scratch/
+.deepeval/

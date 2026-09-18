@@ -16,14 +16,6 @@ class State(TypedDict):
     route: str
     retry_count: int
     reflection_feedback: Optional[str]
-    reflection_trace: Optional[list]
-    evidence_chain: list
-    timeline: list
-    hypotheses: list
-    contradictions: list
-    adjusted_confidence: float
-
-
 
 
 class RouteDecision(BaseModel):

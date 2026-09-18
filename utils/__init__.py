@@ -1,1 +1,1 @@
-"""Utility modules for logging and configuration."""
+"""Utility modules for Monarch (configuration, logging, retry policies, evaluation)."""

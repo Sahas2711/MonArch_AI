@@ -11,8 +11,8 @@ User (SRE Workstation UI)
         │
         ▼
 ┌─────────────────────────────────────────────────────┐
-│                 FastAPI Gateway (api.py)             │
-│  POST /api/chat  │  POST /api/ingest  │  GET /api/health  │
+│             FastAPI Gateway (app/main.py)            │
+│  POST /rag/retrieve  │  POST /rag/upload  │  POST /rag/ingest-text  │
 └─────────────────────────────────────────────────────┘
         │
         ▼
@@ -49,16 +49,13 @@ User (SRE Workstation UI)
 
 ## Components
 
-### 1. FastAPI Gateway (`api.py`)
+### 1. FastAPI Gateway (`app/main.py`)
 
 | Endpoint | Method | Description |
 |---|---|---|
-| `/api/chat` | POST | Execute multi-agent investigation query |
-| `/api/ingest` | POST | Upload evidence files (logs, PDFs, images) |
-| `/api/memories` | GET/POST | Manage long-term memory facts |
-| `/api/health` | GET | System health, model status, LangSmith state |
-| `/api/demo-incident` | POST | Load pre-built demo incident (INC-042) |
-| `/api/report` | POST | Generate executive incident report |
+| `/rag/retrieve` | POST | Query RAG vector store for relevant context |
+| `/rag/ingest-text` | POST | Ingest raw text content into RAG store |
+| `/rag/upload` | POST | Upload and ingest documents (PDF, DOCX, TXT, images) |
 
 ### 2. Agent Pipeline (`Agents/`)
 
@@ -95,14 +92,11 @@ User (SRE Workstation UI)
 
 | Table | Purpose |
 |---|---|
-| `chats` | Chat session metadata |
-| `messages` | Timestamped conversation history (episodic) |
-| `user_memories` | Long-term durable facts (semantic, pgvector) |
-| `chat_summaries` | Consolidated conversation summaries |
+| `memories` | Agent memory entries (SQLite with WAL mode) |
 
 ### 6. MCP Server (`MCP/server.py`)
 
-Exposes tool capabilities over Streamable-HTTP (`http://127.0.0.1:8000/mcp`) for external LLM integrations via FastMCP.
+Exposes tool capabilities over SSE transport (`http://127.0.0.1:8001/mcp`) for external LLM integrations via FastMCP.
 
 ## Data Flow
 
@@ -145,8 +139,8 @@ Exposes tool capabilities over Streamable-HTTP (`http://127.0.0.1:8000/mcp`) for
 | Vector Store | FAISS |
 | Keyword Search | BM25 (rank-bm25) |
 | Document Processing | pypdf, python-docx, pytesseract |
-| Database | SQLite (dev) / PostgreSQL+pgvector (prod) |
+| Database | SQLite (WAL mode) |
 | Cloud Storage | AWS S3 |
 | Observability | LangSmith |
 | Evaluation | DeepEval |
-| Containerization | Docker + docker-compose |
+| Containerization | Docker + docker-compose (planned) |
