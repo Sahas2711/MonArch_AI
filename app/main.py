@@ -1,11 +1,13 @@
 from typing import Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import shutil
 import tempfile
 import os
 import logging
+import time
+from collections import defaultdict
 
 from RAG import rag_manager
 
@@ -13,12 +15,43 @@ logger = logging.getLogger("monarch.api")
 
 API_VERSION = "1.0.0"
 MAX_UPLOAD_SIZE_MB = 50
+RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "60"))
+RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "30"))
 ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".md", ".csv", ".png", ".jpg", ".jpeg"}
+
+
+class RateLimitMiddleware:
+    def __init__(self, app, window: int = 60, max_requests: int = 30):
+        self.app = app
+        self.window = window
+        self.max_requests = max_requests
+        self.requests: dict[str, list[float]] = defaultdict(list)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        client = scope.get("client")
+        if client:
+            ip = client[0]
+            now = time.time()
+            self.requests[ip] = [t for t in self.requests[ip] if now - t < self.window]
+            if len(self.requests[ip]) >= self.max_requests:
+                from starlette.responses import JSONResponse
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded. Try again later."},
+                )
+                return await response(scope, receive, send)
+            self.requests[ip].append(now)
+
+        return await self.app(scope, receive, send)
 
 app = FastAPI(title="MonArch AI", version=API_VERSION)
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
+app.add_middleware(RateLimitMiddleware, window=RATE_LIMIT_WINDOW, max_requests=RATE_LIMIT_MAX_REQUESTS)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
