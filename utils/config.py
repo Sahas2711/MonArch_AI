@@ -28,5 +28,12 @@ LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "Monarch")
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8001"))
 
+# Validate required API key at startup
+if not GROQ_API_KEY:
+    raise RuntimeError(
+        "GROQ_API_KEY is required. Set it in your .env file or environment. "
+        "Get a key at https://console.groq.com/keys"
+    )
+
 # LLM instance
 llm = ChatGroq(model=GROQ_MODEL, api_key=GROQ_API_KEY, timeout=60, max_retries=2)
