@@ -18,6 +18,8 @@ class MemoryRepository:
     def _init_db(self):
         """Initialize the database schema."""
         with sqlite3.connect(self.db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
