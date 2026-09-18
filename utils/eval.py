@@ -1,43 +1,50 @@
-import json
 import os
-from datetime import datetime
+try:
+    from langsmith import traceable
+except ImportError:
+    def traceable(name=None, **kwargs):
+        def decorator(func):
+            return func
+        return decorator if name or kwargs else (lambda f: f)
+
 from utils.logger import log
 
 
-def run_eval(query: str, expected_answer: str, actual_answer: str, context: str = "") -> dict:
-    """
-    Run a basic evaluation comparing expected vs actual answers.
+@traceable(name="run_eval")
+def run_eval(final_state: dict):
+    """Optional DeepEval scoring hook — evaluates output quality and logs results."""
+    if not os.getenv("OPENAI_API_KEY"):
+        log.warning("OPENAI_API_KEY not set — skipping DeepEval metrics evaluation.")
+        return None
 
-    Returns:
-        dict with score, matches, and details
-    """
-    score = 0.0
-    details = []
+    try:
+        from deepeval import evaluate
+        from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
+        from deepeval.test_case import LLMTestCase
 
-    # Exact match check
-    if expected_answer.lower().strip() == actual_answer.lower().strip():
-        score += 1.0
-        details.append("Exact match found.")
-    else:
-        # Partial word overlap
-        expected_words = set(expected_answer.lower().split())
-        actual_words = set(actual_answer.lower().split())
-        if expected_words:
-            overlap = len(expected_words & actual_words) / len(expected_words)
-            score += overlap
-            details.append(f"Word overlap: {overlap:.2%}")
+        messages = final_state.get("messages", [])
+        if len(messages) < 2:
+            log.warning("Not enough messages to evaluate.")
+            return None
 
-    # Length similarity check
-    len_ratio = min(len(actual_answer), len(expected_answer)) / max(len(actual_answer), len(expected_answer), 1)
-    score = (score + len_ratio) / 2
+        context_str = final_state.get("context", "")
+        retrieval_context = [context_str] if context_str and context_str != "(no relevant context found)" else ["No context provided."]
 
-    result = {
-        "query": query,
-        "score": round(score, 3),
-        "passed": score >= 0.5,
-        "details": details,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+        test_case = LLMTestCase(
+            input=final_state["user_inp"],
+            actual_output=messages[-1].content,
+            retrieval_context=retrieval_context,
+        )
 
-    log.info("Eval result for query '%s': score=%.3f, passed=%s", query[:50], score, result["passed"])
-    return result
+        results = evaluate(
+            test_cases=[test_case],
+            metrics=[
+                FaithfulnessMetric(threshold=0.7),
+                AnswerRelevancyMetric(threshold=0.7),
+            ],
+            print_results=False,
+        )
+        return results
+    except Exception as exc:
+        log.warning("DeepEval evaluation failed (e.g. rate limit / quota check): %s", exc)
+        return {"status": "skipped", "reason": str(exc)}

@@ -1,84 +1,55 @@
-import sqlite3
-import json
-import os
-from datetime import datetime
-from typing import Optional
-from utils.logger import log
-
-DB_PATH = os.getenv("SQLITE_DB_PATH", "monarch.db")
+import uuid
+from typing import List, Optional
+from SQL.db import get_sqlite_connection, init_sqlite_db
 
 
 class MemoryRepository:
-    """SQLite-backed repository for storing agent memory and conversation history."""
+    """Repository managing long-term user memories and chat persistent storage."""
 
-    def __init__(self, db_path: str = DB_PATH):
+    def __init__(self, db_path: str = "monarch.db"):
         self.db_path = db_path
-        self._init_db()
+        init_sqlite_db(db_path)
 
-    def _init_db(self):
-        """Initialize the database schema."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=5000")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id TEXT NOT NULL,
-                    category TEXT NOT NULL DEFAULT 'general',
-                    content TEXT NOT NULL,
-                    metadata TEXT DEFAULT '{}',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category)
-            """)
-            conn.commit()
+    def add_memory(self, user_id: str, content: str, chat_id: Optional[str] = None) -> str:
+        """Store a new long-term memory fact for a user."""
+        memory_id = str(uuid.uuid4())
+        conn = get_sqlite_connection(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO user_memories (id, user_id, content, source_chat_id, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            (memory_id, user_id, content, chat_id),
+        )
+        conn.commit()
+        conn.close()
+        return memory_id
 
-    def store(self, user_id: str, content: str, category: str = "general", metadata: dict = None) -> int:
-        """Store a memory entry and return its ID."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "INSERT INTO memories (user_id, category, content, metadata) VALUES (?, ?, ?, ?)",
-                (user_id, category, content, json.dumps(metadata or {})),
-            )
-            conn.commit()
-            memory_id = cursor.lastrowid
-            log.info("Stored memory %d for user %s (category=%s)", memory_id, user_id, category)
-            return memory_id
+    def get_user_memories(self, user_id: str) -> List[str]:
+        """Fetch all active long-term memories for a given user."""
+        conn = get_sqlite_connection(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT content FROM user_memories WHERE user_id = ? AND is_active = 1",
+            (user_id,),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        return [row["content"] for row in rows]
 
-    def retrieve(self, user_id: str, category: Optional[str] = None, limit: int = 10) -> list[dict]:
-        """Retrieve memories for a user, optionally filtered by category."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            if category:
-                rows = conn.execute(
-                    "SELECT * FROM memories WHERE user_id = ? AND category = ? ORDER BY created_at DESC LIMIT ?",
-                    (user_id, category, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                    (user_id, limit),
-                ).fetchall()
-            return [dict(row) for row in rows]
-
-    def delete(self, memory_id: int) -> bool:
-        """Delete a memory entry by ID."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-            conn.commit()
-            return cursor.rowcount > 0
-
-    def list_users(self) -> list[str]:
-        """List all unique user IDs with stored memories."""
-        with sqlite3.connect(self.db_path) as conn:
-            rows = conn.execute("SELECT DISTINCT user_id FROM memories").fetchall()
-            return [row[0] for row in rows]
+    def save_message(self, chat_id: str, role: str, content: str) -> int:
+        """Save a user/assistant message to history."""
+        conn = get_sqlite_connection(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)",
+            (chat_id, role, content),
+        )
+        conn.commit()
+        msg_id = cursor.lastrowid
+        conn.close()
+        return msg_id
 
 
-# Global singleton
 memory_repo = MemoryRepository()

@@ -1,28 +1,15 @@
-# 👑 Monarch — AI Incident Investigator
+# 👑 Monarch — Production-Grade Multi-Agent AI Platform
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2+-blue.svg)](https://langchain-ai.github.io/langgraph/)
-[![AWS S3 + ECS](https://img.shields.io/badge/AWS-S3_%26_Fargate-ff9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/)
 [![Groq Vision](https://img.shields.io/badge/Groq-Vision_llama--3.2-orange.svg)](https://groq.com/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg?logo=docker)](https://www.docker.com/)
+[![AWS Deployment](https://img.shields.io/badge/AWS-Cloud_Deployed-ff9900.svg?style=flat&logo=amazon-aws)](https://aws.amazon.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-> **The Hackathon Winning Discipline**: *"Monarch doesn't just give you an AI answer — it investigates the evidence and shows you why the answer is true."*
+**Monarch** is an enterprise-level multi-agent orchestration platform built with **LangGraph**, **Groq Vision**, **FastAPI**, **Hybrid RAG (FAISS + BM25)**, **FastMCP**, **Enterprise Guardrails**, **Reflection Loop Engineering**, and **Automated Evaluation Harnesses**.
 
-**Monarch** is an **AI Incident Investigator** that turns messy production evidence across logs, post-mortems, metrics dashboards, and screenshots into a verified, traceable root-cause report.
-
----
-
-## 🎬 3-Minute Video Demo Script & Breakdown
-
-| Time Window | Phase | Demo Action & Screen Display |
-| :--- | :--- | :--- |
-| **0:00 - 0:15** | **The Problem** | Production outage occurs (`INC-042`). Evidence is scattered across application logs, database logs, post-mortem PDFs, and dashboard screenshots. |
-| **0:15 - 0:30** | **1-Click Ingestion** | Click **"⚡ LOAD DEMO INCIDENT (INC-042)"**. Monarch ingests `deployment.log`, `application.log`, `database.log`, `incident_report.md`, and `monitoring_dashboard.png`, assigning deterministic Evidence IDs (`[E001]` - `[E005]`). |
-| **0:30 - 1:15** | **AI Investigation** | Ask: *"Why did checkout start failing after deployment v2.4?"*. Watch the Agent Stepper animate through `Router` $\rightarrow$ `Log Analyst` $\rightarrow$ `RAG Researcher` $\rightarrow$ `Vision Analyst` $\rightarrow$ `Evidence Fusion` $\rightarrow$ `Contradiction Audit` $\rightarrow$ `Verifier`. |
-| **1:15 - 1:45** | **Evidence Chain & Timeline** | Monarch displays verified Root Cause: **Database Connection Pool Exhaustion** (91% Confidence). Click `[E003]` (`database.log`: line 4821) and scrub the interactive Incident Timeline (14:02 $\rightarrow$ 14:04 $\rightarrow$ 14:07 $\rightarrow$ 14:08 $\rightarrow$ 14:15). |
-| **1:45 - 2:10** | **Contradiction Audit** | Show Competing Hypotheses: **Hypothesis A** (DB Pool Exhaustion - Verified) vs **Hypothesis B** (Network Outage - Disproved by telemetry in `incident_report.md`). |
-| **2:10 - 2:35** | **AWS Integration** | Demonstrate S3 snapshot persistence (`s3://monarch-evidence-bucket/reports/inc-042.md`) & CloudWatch observability status. |
-| **2:35 - 3:00** | **Report Generation** | Click **"📄 GENERATE INCIDENT REPORT"** to open executive report modal with Markdown copy/download options. |
+It handles multimodal processing across **Text**, **Images**, **PDFs**, and **DOCX** files, enforcing robust PII masking, rate limiting, and output faithfulness checks out of the box.
 
 ---
 
@@ -30,134 +17,254 @@
 
 ```mermaid
 flowchart TD
-    User([SRE Investigator / Workstation UI]) --> |POST /api/chat| API[FastAPI Gateway api.py]
+    Client([User / Web Workbench / MCP Client]) --> |HTTP / REST| API[FastAPI Backend api.py]
     
-    subgraph Ingestion ["Multimodal Evidence Ingestion"]
-        API --> IngestEngine[Ingest Engine & E-ID Assigner]
-        IngestEngine --> Logs[deployment.log / application.log / database.log]
-        IngestEngine --> Docs[incident_report.md / PDF]
-        IngestEngine --> Vision[monitoring_dashboard.png OCR]
-        IngestEngine --> VectorDB[(FAISS + Rank-BM25 Hybrid Index)]
+    subgraph Security ["Security & Middleware Layer"]
+        API --> RateLimiter[Sliding Window Rate Limiter Middleware]
+        RateLimiter --> InputGuard[Input Guardrail: PII Masking & Injection Filter]
     end
 
-    subgraph Agents ["LangGraph Investigation Pipeline (Agents/)"]
-        API --> Router["Orchestrator Router"]
-        Router --> LogAgent["Log Analyst Agent"]
-        Router --> RAGAgent["RAG Research Agent"]
-        Router --> VisionAgent["Vision Analyst Agent"]
+    subgraph Agents ["LangGraph Multi-Agent Engine (Agents/)"]
+        InputGuard --> Orchestrator["Orchestrator Router (router.py)"]
+        Orchestrator --> |Structured Decision| RouteSwitch{Route Selector}
         
-        LogAgent --> Fusion["Evidence Fusion Engine"]
-        RAGAgent --> Fusion
-        VisionAgent --> Fusion
+        RouteSwitch -->|General Reasoning| Planner["Planner Agent (planner.py)"]
+        RouteSwitch -->|Live Info / Search| Research["Research Agent (research.py)"]
+        RouteSwitch -->|Document Corpus| RAGNode["Hybrid RAG Agent (rag.py)"]
+        RouteSwitch -->|Image / Visual Prompt| VisionNode["Vision Agent (vision.py)"]
         
-        Fusion --> Contradiction["Contradiction Engine (utils/contradiction.py)"]
-        Contradiction --> Reflection["Reflection Critic (Agents/reflection.py)"]
-        Reflection --> Verifier["Post-Investigation Verifier"]
+        Planner --> Reflection["Reflection Critic Node (reflection.py)"]
+        Research --> Reflection
+        RAGNode --> Reflection
+        VisionNode --> Reflection
+
+        Reflection -->|Refinement Needed & Retry <= 2| RouteSwitch
+        Reflection -->|Pass / Complete| OutputGuard[Output Faithfulness Guardrail]
     end
 
-    subgraph Output ["Verified Evidence Output"]
-        Verifier --> RootCause[Verified Root Cause Statement]
-        Verifier --> EvidenceChain["Evidence Chain (E001, E002, E003...)"]
-        Verifier --> Timeline["Chronological Incident Timeline"]
-        Verifier --> ReportGen[Executive Incident Report Generator]
+    subgraph RAGSubsystem ["Multimodal RAG Subsystem (RAG/)"]
+        RAGNode --> Manager["RAGAgentManager (manager.py)"]
+        Manager --> MultiLoader[Loaders: PDF, DOCX, TXT, Image OCR]
+        MultiLoader --> Hybrid[Hybrid Search: FAISS + BM25 + RRF]
     end
 
-    subgraph AWS ["AWS Cloud Infrastructure"]
-        ReportGen --> S3[AWS S3 s3://monarch-evidence]
-        API --> ECS[AWS ECS / Fargate Container]
-        API --> CW[AWS CloudWatch Logs]
+    subgraph External ["External Integration"]
+        Research --> DDG[DuckDuckGo Search API]
+        VisionNode --> GroqVision[Groq Vision: llama-3.2-11b-vision-preview]
+        API --> MemoryRepo[(SQLite Memory Repository)]
     end
+
+    OutputGuard --> FinalOutput([Client Response + DeepEval Metrics])
 ```
 
 ---
 
-## 🌟 Key Technical Innovations
+## 📁 Repository Directory Structure
 
-### 1. 🔗 Deterministic Evidence Chain (`utils/evidence_chain.py`)
-Rather than allowing LLMs to hallucinate line numbers, Monarch pre-indexes evidence lines and assigns deterministic Evidence IDs (`E001`, `E002`, `E003`...). Claims are verified against exact indexed IDs with source file, line number, quote, and timestamp.
-
-### 2. ⏱️ Interactive Incident Timeline Scrubber (`utils/timeline.py`)
-Parses ISO and `HH:MM:SS` timestamps across text logs, PDFs, and vision summaries into a unified, chronological scrubber bar. Clicking any node jumps directly to the underlying evidence citation.
-
-### 3. ⚖️ Competing Hypotheses & Contradiction Detection (`utils/contradiction.py`)
-Audits investigation conclusions by evaluating competing hypotheses (Hypothesis A vs Hypothesis B), tallying supporting vs contradicting evidence counts, and flagging conflicting evidence (e.g. network latency logs disproving an initial network outage theory).
-
-### 4. 🔄 Reflection Self-Correction Loop (`Agents/reflection.py`)
-Exposes step-by-step agent trace: Initial Hypothesis $\rightarrow$ Critic Review $\rightarrow$ Verified Conclusion, proving why multi-agent self-correction matters for root-cause analysis.
-
-### 5. ☁️ Essential AWS Cloud Architecture
-- **AWS S3**: Backup bucket (`s3://monarch-evidence`) storing raw evidence and JSON/Markdown investigation snapshots.
-- **AWS ECS / Fargate**: Containerized execution engine running FastAPI backend.
-- **AWS CloudWatch**: Observability metrics and telemetry logs.
+```
+Monarch/
+├── .env                        # Environment API keys & global configurations
+├── Dockerfile                  # Container build instructions with OCR & PDF libraries
+├── docker-compose.yml          # One-command multi-service orchestration
+├── pyproject.toml              # Project dependencies & metadata
+├── requirements.txt            # Python dependencies (LangGraph, Groq, FAISS, PyPDF, Docx, etc.)
+├── main.py                     # Primary CLI application entrypoint & test harness driver
+├── api.py                      # FastAPI REST service with rate limiting & endpoints
+├── index.html                  # Monarch Web Workbench HTML interface
+├── static/                     # Web UI styles & JavaScript logic
+│   ├── app.js                  # Frontend REST API integration & image base64 uploader
+│   └── style.css               # Glassmorphism dark mode stylesheet
+│
+├── Agents/                     # LangGraph Multi-Agent Workflow Core
+│   ├── __init__.py             # Exports state, nodes, and compiled graph
+│   ├── state.py                # Canonical LangGraph State schema & Pydantic RouteDecision
+│   ├── router.py               # Orchestrator routing node with Input Guardrail integration
+│   ├── planner.py              # General planning & reasoning agent node
+│   ├── research.py             # Live web search research agent node
+│   ├── rag.py                  # Document RAG agent node
+│   ├── vision.py               # Multimodal Groq Vision agent node
+│   ├── reflection.py           # Reflection critic node for self-correction loops
+│   └── graph.py                # LangGraph workflow builder with reflection loops
+│
+├── guardrails/                 # Security, Safety, & Output Verification
+│   ├── __init__.py             # Guardrails package initialization
+│   ├── input_guard.py          # PII masking (Emails, Keys, Cards) & prompt injection defense
+│   └── output_guard.py         # Output RAG faithfulness & hallucination verification
+│
+├── harness/                    # Automated Evaluation & Regression Testing
+│   ├── __init__.py             # Evaluation harness package
+│   └── eval_suite.py           # Automated benchmark suite runner across agent routes
+│
+├── RAG/                        # Multimodal Hybrid RAG Subsystem
+│   ├── __init__.py             # Exports RAGAgentManager and rag_manager singleton
+│   ├── embeddings.py           # HuggingFace embeddings wrapper
+│   ├── retriever.py            # Hybrid retrieval (FAISS + BM25 + Reciprocal Rank Fusion)
+│   └── manager.py              # Document loader (PDF, DOCX, TXT, OCR), chunking & vector store
+│
+├── SQL/                        # Memory Persistence & Database Repositories
+│   ├── schema.sql              # Database DDL schema (user_memories, chat_messages)
+│   ├── db.py                   # SQLite / PostgreSQL database connection manager
+│   ├── repository.py           # MemoryRepository for durable chat persistence
+│   └── memory_consolidator.py  # Asynchronous background memory fact distillation
+│
+├── MCP/                        # Model Context Protocol
+│   ├── __init__.py             # Exports run_mcp_server
+│   └── server.py               # FastMCP streamable HTTP server exposing system tools
+│
+└── utils/                      # Utilities & Middleware
+    ├── config.py               # Auto-resolving Groq LLM model selector & settings
+    ├── logger.py               # Centralized logging instance
+    ├── retry.py                # Exponential backoff retry decorator (@llm_retry)
+    ├── rate_limiter.py         # In-memory sliding window rate limiter middleware
+    └── eval.py                 # DeepEval metric scoring hook
+```
 
 ---
 
-## 📊 Real Evaluation & Benchmark Results (`evaluation_report.json`)
+## 🌟 Key Technical Features
 
-Evaluated across **20 synthetic incident scenarios** and 100+ evidence documents:
+### 1. 🖼️ Multimodal Support (Text, Image, PDF, DOCX)
+* **Text & Markdown**: Index `.txt` and `.md` files directly.
+* **PDFs & Word Docs**: Ingest `.pdf`, `.docx`, and `.doc` files via `PyPDFLoader` and `Docx2txtLoader`.
+* **Vision & Image Processing**: Direct image prompts handled by **Groq Vision** (`llama-3.2-11b-vision-preview`). OCR ingestion for `.png`, `.jpg`, `.jpeg` via `pytesseract`.
 
-| Metric Dimension | Benchmark Target | Measured Monarch Score | Status |
-| :--- | :---: | :---: | :---: |
-| **Retrieval Recall@5** | $\ge 90\%$ | **92.0%** | ✅ PASS |
-| **Root Cause Accuracy** | $\ge 90\%$ | **91.0%** | ✅ PASS |
-| **Grounded Claims Rate** | $\ge 90\%$ | **94.0%** | ✅ PASS |
-| **Prompt Injection Block Rate** | $\ge 95\%$ | **97.0%** | ✅ PASS |
-| **PII Redaction Rate** | $100\%$ | **100.0%** | ✅ PASS |
-| **P50 Latency** | $< 2.0\text{s}$ | **1.42s** | ✅ PASS |
-| **P95 Latency** | $< 5.0\text{s}$ | **4.81s** | ✅ PASS |
+### 2. 🛡️ Enterprise Guardrails Layer
+* **Input Guardrail (`guardrails/input_guard.py`)**: Sanitizes user inputs, masks sensitive PII (Emails, API Keys, Phone Numbers, Credit Cards), and blocks restricted prompt injection attacks.
+* **Output Guardrail (`guardrails/output_guard.py`)**: Verifies RAG responses against retrieved context to ensure faithfulness and flag ungrounded hallucinations.
 
----
+### 3. 🔄 Loop Engineering (Reflection & Self-Correction)
+* **Reflection Node (`Agents/reflection.py`)**: Evaluates agent output quality.
+* **Self-Correction Loop (`Agents/graph.py`)**: Automatically triggers refinement loops (up to 2 retries) with critique feedback if responses are incomplete or ungrounded.
 
-## 🔍 Hackathon Execution Audit (First Commit vs Built Features)
+### 4. ⏱️ Rate Limiting Middleware
+* **Sliding Window Rate Limiter (`utils/rate_limiter.py`)**: Enforces IP-based rate limits (`/api/chat`: 20 req/min, `/api/ingest`: 10 req/min) returning `HTTP 429` with `Retry-After` headers.
 
-| Subsystem / Feature | Pre-Existing Baseline | Built During Hackathon Event |
-| :--- | :--- | :--- |
-| **Product Focus** | General Multi-Agent Chatbot | **Focused AI Incident Investigator** |
-| **Evidence Chain** | Basic text quotes | **Deterministic E-IDs (`E001` - `E005`) & verification** |
-| **Timeline** | Unordered event list | **Interactive Chronological Scrubber UI** |
-| **Contradictions** | Simple conflict text | **Competing Hypotheses Matrix (Hypothesis A vs B)** |
-| **UI Workstation** | Standard Chat Bubbles | **SRE Incident Investigator Workstation & Stepper** |
-| **Demo Incident** | None | **Synthetic 5-file INC-042 scenario + 1-Click Load** |
-| **AWS Integration** | Basic S3 helper | **S3 Report Persistence & ECS readiness** |
-| **Evaluation** | Single test script | **20-Incident Benchmark Suite (`eval_suite.py`)** |
+### 5. 🧪 Automated Evaluation Harness
+* Benchmark runner (`harness/eval_suite.py`) testing routing precision, guardrail enforcement, and execution latency via CLI.
 
 ---
 
-## 🚀 Running Monarch Locally
+## 📸 Observability & Live Execution Proof
+
+### 💬 Interactive Web Workbench Interface
+Monarch features a production-grade Web Workbench supporting document ingestion, real-time agent routing, memory management, and vision analysis:
+
+![Monarch Web Workbench UI](assets/web_workbench.png)
+
+### 📊 Real-Time LangSmith Traces & Cost Tracking
+Full observability into agent execution steps, LLM latencies, token consumption, and cost breakdown per query run:
+
+![LangSmith Tracing Dashboard](assets/langsmith_tracing.png)
+
+---
+
+## 🚀 Quickstart & Installation
 
 ### 1. Prerequisites
-- Python 3.11+
-- Groq API Key (`GROQ_API_KEY`)
+* Python 3.11+
+* Groq API Key (Sign up at [console.groq.com](https://console.groq.com))
 
 ### 2. Environment Setup
+Clone the repository and set up environment variables:
+
 ```bash
-# Clone repository
-git clone https://github.com/monarch/monarch-investigator.git
-cd monarch-investigator
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or venv\Scripts\activate  # Windows
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 3. Configure Environment Variables
-Copy `.env.example` to `.env` and add your `GROQ_API_KEY`:
-```bash
+# Copy example environment file
 cp .env.example .env
 ```
 
-### 4. Start Monarch API Backend & Workstation
-```bash
-python api.py
-```
-Open your browser at **`http://localhost:8000`** to launch the **Monarch AI Incident Investigator Workstation**.
+Edit `.env` and set your credentials:
 
-### 5. Run Automated Evaluation Harness
-```bash
-python -m harness.eval_suite
+```env
+GROQ_API_KEY=gsk_your_groq_api_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
+VISION_MODEL=llama-3.2-11b-vision-preview
+
+# Optional LangSmith Observability
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=lsv2_pt_your_key_here
+LANGCHAIN_PROJECT=Monarch
 ```
-Outputs benchmark results to `evaluation_report.json`.
+
+### 3. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 💻 Usage & Deployment Options
+
+### 1. 🌐 Run FastAPI REST Backend & Web Workbench
+
+Start the FastAPI application:
+
+```bash
+python main.py --serve-api
+```
+
+* **Web Workbench UI**: Open `http://localhost:8000` in your browser.
+* **Swagger OpenAPI Docs**: Open `http://localhost:8000/docs`.
+
+---
+
+### 2. 🐳 Docker & Docker Compose Deployment
+
+Monarch is fully containerized with built-in support for OCR and PDF rendering libraries.
+
+#### Using Docker Compose:
+```bash
+docker-compose up -d --build
+```
+
+#### Using Docker CLI:
+```bash
+# Build Container Image
+docker build -t monarch-app .
+
+# Run Container
+docker run -d -p 8000:8000 --env-file .env --name monarch monarch-app
+```
+
+---
+
+### 3. ☁️ AWS Cloud Infrastructure Deployment
+
+Monarch is configured and deployed on **Amazon Web Services (AWS)** using containerized Docker execution.
+
+* **Production Architecture**: Deployed as a containerized cloud service on AWS with automated health monitoring via `/api/health`.
+* **Security & Environment Isolation**: All API credentials (`GROQ_API_KEY`, etc.) are secured in AWS environment configuration stores.
+* **Multimodal API Endpoint**: Exposes production REST endpoints for multi-agent reasoning, RAG ingestion, memory distillation, and vision processing.
+
+---
+
+### 4. 🧪 Run Automated Evaluation Test Harness
+
+Execute the automated regression benchmark suite:
+
+```bash
+python main.py --run-harness
+```
+
+---
+
+### 5. 📄 Ingest Documents into RAG Store via CLI
+
+```bash
+python main.py --ingest ./path/to/document.pdf --user-id user_123
+```
+
+---
+
+### 6. 🌐 Launch FastMCP Tool Server
+
+Expose Monarch tools over Model Context Protocol (Streamable HTTP):
+
+```bash
+python main.py --serve-mcp
+```
+
+---
+
+## 📄 License
+This project is licensed under the MIT License.

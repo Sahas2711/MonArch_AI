@@ -40,16 +40,9 @@ def _route_decision(user_inp: str) -> RouteDecision:
         "(news, prices, weather, recent events).\n"
         "Otherwise pick planner for general reasoning, coding, or writing tasks."
     )
-    try:
-        return router_llm.invoke(
-            [SystemMessage(content=sys_prompt), HumanMessage(content=user_inp)]
-        )
-    except Exception as exc:
-        log.warning("Router LLM call failed (%s). Falling back to rule-based agent routing.", exc)
-        if has_rag_docs:
-            return RouteDecision(agent="rag_agent", reason="Fallback rule: Target query matched active RAG document corpus.")
-        return RouteDecision(agent="planner", reason="Fallback rule: Defaulting to general reasoning planner agent.")
-
+    return router_llm.invoke(
+        [SystemMessage(content=sys_prompt), HumanMessage(content=user_inp)]
+    )
 
 
 def orchestrator(state: State) -> dict:

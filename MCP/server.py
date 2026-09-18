@@ -1,31 +1,22 @@
-from utils.config import MCP_HOST, MCP_PORT
+from fastmcp import FastMCP
+from Agents.research import _search_tool
+from RAG.manager import rag_manager
 from utils.logger import log
 
 
 def run_mcp_server():
-    """Start the MCP (Model Context Protocol) server."""
-    try:
-        from fastmcp import FastMCP
+    """Start FastMCP server exposing Monarch RAG and search tools over streamable-http."""
+    mcp_server = FastMCP("Monarch tools")
 
-        mcp = FastMCP("MonArch MCP Server")
+    @mcp_server.tool
+    def retriever_tool(query: str, user_id: str = "") -> str:
+        """Retrieve relevant document context for a query."""
+        return rag_manager.retrieve(query, user_id=user_id or None)
 
-        @mcp.tool()
-        def query_rag(query: str, user_id: str = None) -> str:
-            """Query the RAG vector store for relevant document context."""
-            from RAG.manager import rag_manager
-            return rag_manager.retrieve(query=query, user_id=user_id)
+    @mcp_server.tool
+    def websearch_tool(query: str) -> str:
+        """Search the web with DuckDuckGo."""
+        return _search_tool.invoke(query)
 
-        @mcp.tool()
-        def ingest_document(file_path: str, user_id: str = None) -> str:
-            """Ingest a document into the RAG vector store."""
-            from RAG.manager import rag_manager
-            result = rag_manager.ingest(file_path=file_path, user_id=user_id)
-            return f"Ingested {result.get('chunks_added', 0)} chunks successfully."
-
-        log.info("Starting MCP server on %s:%d", MCP_HOST, MCP_PORT)
-        mcp.run(transport="sse", host=MCP_HOST, port=MCP_PORT)
-
-    except ImportError:
-        log.error("fastmcp is not installed. Run: pip install fastmcp")
-    except Exception as exc:
-        log.error("MCP server failed: %s", exc)
+    log.info("Starting MCP server on http://127.0.0.1:8000/mcp (streamable-http)")
+    mcp_server.run(transport="streamable-http", host="127.0.0.1", port=8000)

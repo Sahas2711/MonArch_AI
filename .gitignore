@@ -1,22 +1,29 @@
-venv/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
+# Environment and Secret Files
 .env
 .env.local
-.env.production
-.env.*
-!.env.example
-faiss_index/
-.DS_Store
-*.egg-info/
-dist/
-build/
-*.log
+*.env
+
+# Python Virtual Environments & Caches
+.venv/
+venv/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Databases & Persisted Local Files
 *.db
+*.sqlite
 *.sqlite3
-.idea/
+monarch.db
+
+# IDE & OS Artifacts
 .vscode/
-evaluation_report.json
-node_modules/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Scratch & Brain Temp Folders
+scratch/
+.deepeval/

@@ -1,52 +1,57 @@
+"""
+Input Guardrail for Monarch.
+
+Sanitizes user input, masks sensitive PII (Emails, API Keys, Credit Cards, Phones),
+and detects prompt injection or malicious override attempts.
+"""
+
 import re
+from typing import Dict, Tuple
 from utils.logger import log
 
+# Common PII Regex Patterns
+EMAIL_REGEX = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+API_KEY_REGEX = r'(?:sk-[a-zA-Z0-9]{20,}|gsk_[a-zA-Z0-9]{20,}|AIzaSy[a-zA-Z0-9_-]{33})'
+PHONE_REGEX = r'\b(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b'
+CREDIT_CARD_REGEX = r'\b(?:\d[ -]*?){13,16}\b'
 
-# Patterns that indicate potentially malicious or unsafe input
-_BLOCKED_PATTERNS = [
-    r"(?i)ignore\s+(all\s+)?previous\s+instructions",
-    r"(?i)you\s+are\s+now\s+",
-    r"(?i)system\s*:\s*",
-    r"(?i)act\s+as\s+",
-    r"(?i)pretend\s+you\s+are",
-    r"(?i)disregard\s+",
-    r"<script[^>]*>",
-    r"javascript:",
-    r"(?i)drop\s+table",
-    r"(?i)delete\s+from",
-    r"(?i)exec\s*\(",
-    r"(?i)eval\s*\(",
+# Common Injection Patterns
+INJECTION_KEYWORDS = [
+    "ignore previous instructions",
+    "ignore all instructions",
+    "disregard safety guidelines",
+    "system prompt override",
+    "you are now DAN",
+    "bypass safety filters",
 ]
 
-_MAX_INPUT_LENGTH = 10000
 
-
-def sanitize_and_validate_input(raw_input: str) -> tuple[str, bool, str]:
+def sanitize_and_validate_input(user_inp: str) -> Tuple[str, bool, str]:
     """
-    Sanitize and validate user input.
-
+    Sanitizes user prompt, masks PII, and checks for prompt injection.
+    
     Returns:
-        (sanitized_input, is_safe, reason)
-        - sanitized_input: cleaned version of the input
-        - is_safe: True if input passed all checks
-        - reason: explanation if blocked, empty string otherwise
+      (sanitized_text, is_safe, reason)
     """
-    if not raw_input or not raw_input.strip():
-        return "", False, "Empty input provided."
+    if not user_inp or not user_inp.strip():
+        return user_inp, True, "Empty input"
 
-    text = raw_input.strip()
+    query_lower = user_inp.lower()
 
-    # Length check
-    if len(text) > _MAX_INPUT_LENGTH:
-        return text[:_MAX_INPUT_LENGTH], False, f"Input exceeds maximum length of {_MAX_INPUT_LENGTH} characters."
+    # 1. Prompt Injection Detection
+    for pattern in INJECTION_KEYWORDS:
+        if pattern in query_lower:
+            log.warning("Prompt injection pattern detected in input: %r", pattern)
+            return user_inp, False, f"Input blocked due to restricted system override phrase: '{pattern}'"
 
-    # Pattern-based injection detection
-    for pattern in _BLOCKED_PATTERNS:
-        if re.search(pattern, text):
-            log.warning("Input blocked by guardrail pattern: %s", pattern)
-            return text, False, "Input contains potentially unsafe content."
+    # 2. PII Masking
+    sanitized = user_inp
+    sanitized = re.sub(EMAIL_REGEX, "[REDACTED_EMAIL]", sanitized)
+    sanitized = re.sub(API_KEY_REGEX, "[REDACTED_API_KEY]", sanitized)
+    sanitized = re.sub(PHONE_REGEX, "[REDACTED_PHONE]", sanitized)
+    sanitized = re.sub(CREDIT_CARD_REGEX, "[REDACTED_CARD]", sanitized)
 
-    # Basic sanitization: strip null bytes and control characters
-    sanitized = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    if sanitized != user_inp:
+        log.info("PII masking applied to user input.")
 
-    return sanitized, True, ""
+    return sanitized, True, "Passed input guardrails"
