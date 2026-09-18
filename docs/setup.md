@@ -48,10 +48,10 @@ GROQ_API_KEY=gsk_your_key_here
 ### 5. Start the Server
 
 ```bash
-python api.py
+python main.py
 ```
 
-Open http://localhost:8000 in your browser.
+Open http://localhost:8001 in your browser.
 
 ---
 
@@ -60,7 +60,7 @@ Open http://localhost:8000 in your browser.
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `GROQ_API_KEY` | Yes | — | Groq API key for LLM access |
-| `GROQ_MODEL` | No | `openai/gpt-oss-20b` | Groq model to use (auto-fallback if deprecated) |
+| `GROQ_MODEL` | No | `llama-3.3-70b-versatile` | Groq model to use (auto-fallback if deprecated) |
 | `EMBEDDING_MODEL` | No | `sentence-transformers/all-MiniLM-L6-v2` | Sentence-transformers model |
 | `UNSTRUCTURED_API_KEY` | No | — | For advanced document parsing |
 | `LANGCHAIN_API_KEY` | No | — | Enables LangSmith tracing |
@@ -70,21 +70,9 @@ Open http://localhost:8000 in your browser.
 
 ---
 
-## Docker Setup
+## Docker Setup (Planned)
 
-### Build and Run
-
-```bash
-docker-compose up --build
-```
-
-The API will be available at http://localhost:8000.
-
-### Docker Compose Services
-
-| Service | Port | Description |
-|---|---|---|
-| `monarch-api` | 8000 | FastAPI backend |
+Docker support is planned but not yet implemented. See [Dockerfile](../Dockerfile) when available.
 
 ---
 
@@ -93,31 +81,22 @@ The API will be available at http://localhost:8000.
 ### Health Check
 
 ```bash
-curl http://localhost:8000/api/health
+curl http://localhost:8001/
 ```
 
 Expected response:
 ```json
 {
-  "status": "healthy",
-  "groq_model": "openai/gpt-oss-20b",
-  "langsmith_active": false
+  "message": "MonArch AI API is running",
+  "version": "1.0.0"
 }
 ```
 
-### Load Demo Incident
+### Upload a Document
 
 ```bash
-curl -X POST http://localhost:8000/api/demo-incident
+curl -X POST http://localhost:8001/rag/upload -F "file=@your_document.pdf"
 ```
-
-### Run Evaluation Harness
-
-```bash
-python -m harness.eval_suite
-```
-
-Outputs results to `evaluation_report.json`.
 
 ---
 
@@ -137,22 +116,22 @@ cp .env.example .env
 # Edit .env with your actual key
 ```
 
-### "Connection refused at localhost:8000"
+### "Connection refused at localhost:8001"
 
 Backend is not running. Start it:
 ```bash
-python api.py
+python main.py
 ```
 
 ### Port Already in Use
 
 ```bash
 # Windows
-netstat -ano | findstr :8000
+netstat -ano | findstr :8001
 taskkill /PID <PID> /F
 
 # Linux/Mac
-lsof -ti:8000 | xargs kill -9
+lsof -ti:8001 | xargs kill -9
 ```
 
 ---
