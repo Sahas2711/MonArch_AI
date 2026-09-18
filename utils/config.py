@@ -26,3 +26,5 @@ LANGCHAIN_PROJECT = os.getenv("LANGCHAIN_PROJECT", "Monarch")
 # MCP Server
 MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
 MCP_PORT = int(os.getenv("MCP_PORT", "8001"))
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+
