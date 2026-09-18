@@ -16,7 +16,7 @@ UNSTRUCTURED_API_KEY = os.getenv("UNSTRUCTURED_API_KEY", "")
 
 # Optional: LLM keys
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # Optional: LangChain / LangSmith Observability
 LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
