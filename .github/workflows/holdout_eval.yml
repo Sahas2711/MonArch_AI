@@ -1,0 +1,46 @@
+name: Holdout Benchmark Quality Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      split:
+        description: "Benchmark split to execute"
+        required: true
+        default: "holdout"
+        type: choice
+        options:
+          - holdout
+          - validation
+          - adversarial
+          - all
+
+jobs:
+  holdout-evaluation:
+    name: Isolated Holdout Benchmark Execution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run Holdout Evaluation
+        run: |
+          python -m evaluation.runner --split ${{ github.event.inputs.split }} --report holdout_eval_report.md
+
+      - name: Upload Holdout Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: holdout-benchmark-report
+          path: holdout_eval_report.md

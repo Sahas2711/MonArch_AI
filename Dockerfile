@@ -11,6 +11,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Build metadata arguments
+ARG COMMIT_SHA=dev
+ARG BUILD_DATE=""
+ENV COMMIT_SHA=${COMMIT_SHA} \
+    BUILD_DATE=${BUILD_DATE}
+
 # Install system dependencies for PDF parsing, Word documents, & Image OCR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \

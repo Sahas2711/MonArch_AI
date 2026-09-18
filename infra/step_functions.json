@@ -1,0 +1,33 @@
+{
+  "Comment": "Monarch / Vasooli MSME Contract Pipeline State Machine",
+  "StartAt": "ExtractDocumentText",
+  "States": {
+    "ExtractDocumentText": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "MonarchTextractExtractor",
+        "Payload.$": "$"
+      },
+      "Next": "EvaluateFairnessCedar"
+    },
+    "EvaluateFairnessCedar": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "MonarchCedarEvaluator",
+        "Payload.$": "$"
+      },
+      "Next": "DraftActionComplaint"
+    },
+    "DraftActionComplaint": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrock:invokeModel",
+      "Parameters": {
+        "ModelId": "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+        "Body.$": "$"
+      },
+      "End": true
+    }
+  }
+}

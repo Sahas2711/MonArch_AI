@@ -1,0 +1,4 @@
+Draft a formal Samadhaan portal complaint paragraph under Section 18 of the MSME Development Act 2006 based on the following violation:
+Violation: {violation}
+Cited Law: {cited_law}
+Ensure the complaint specifies statutory grounds and demand for principal plus 3x RBI bank rate compound interest.

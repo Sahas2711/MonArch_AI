@@ -16,7 +16,7 @@ MAX_RETRIES = 2
 
 
 @llm_retry()
-def reflection_node(state: State) -> dict:
+async def reflection_node(state: State) -> dict:
     """
     Evaluates response quality and checks if self-correction retry is needed.
     """
@@ -48,7 +48,7 @@ def reflection_node(state: State) -> dict:
     user_payload = f"USER PROMPT: {user_inp}\n\nGENERATED RESPONSE:\n{output}"
 
     try:
-        res = llm.invoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_payload)])
+        res = await llm.ainvoke([SystemMessage(content=sys_prompt), HumanMessage(content=user_payload)])
         content = res.content.strip()
         lines = [line.strip() for line in content.split("\n") if line.strip()]
 
