@@ -5,7 +5,10 @@ from utils.config import llm
 from utils.logger import log
 from utils.retry import llm_retry
 
-_search_tool = DuckDuckGoSearchRun()
+try:
+    _search_tool = DuckDuckGoSearchRun()
+except Exception:
+    _search_tool = None
 
 
 @llm_retry()

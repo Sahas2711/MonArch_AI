@@ -116,9 +116,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from vasooli.api import v2_router
+
 # Mount static assets directory
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Mount Vasooli V2 Evidence-First REST Router
+app.include_router(v2_router)
 
 
 # --------------------------------------------------------------------------

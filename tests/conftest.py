@@ -3,14 +3,14 @@ Pytest Fixtures for Monarch Agent & API Test Suite.
 """
 
 import pytest
-from fastapi.testclient import TestClient
-from api import app
 from Agents.state import State
 
 
 @pytest.fixture
 def api_client():
-    """FastAPI TestClient fixture."""
+    """FastAPI TestClient fixture (lazy import)."""
+    from fastapi.testclient import TestClient
+    from api import app
     with TestClient(app) as client:
         yield client
 
