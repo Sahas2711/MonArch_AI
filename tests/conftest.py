@@ -54,6 +54,7 @@ def mock_llm_and_graph():
         patch("Agents.graph._graph_instance", _mock_graph),
         patch("Agents.planner._planner_llm", _mock_llm),
         patch("Agents.router._router_llm", _mock_llm),
+        patch("Agents.vision._vision_llm", _mock_llm),
     ):
         yield _mock_llm, _mock_graph
 
