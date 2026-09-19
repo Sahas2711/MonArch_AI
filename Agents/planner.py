@@ -5,7 +5,14 @@ from utils.config import llm
 from utils.retry import llm_retry
 
 PLANNER_TOOLS = [calculator_tool, datetime_tool, search_memories_tool, code_executor_tool]
-_planner_llm = llm.bind_tools(PLANNER_TOOLS)
+_planner_llm = None
+
+
+def _get_planner_llm():
+    global _planner_llm
+    if _planner_llm is None:
+        _planner_llm = llm.bind_tools(PLANNER_TOOLS)
+    return _planner_llm
 
 
 @llm_retry()
@@ -22,7 +29,7 @@ async def planner(state: State) -> dict:
     user_inp = state["user_inp"]
     messages = [SystemMessage(content=sys_prompt), HumanMessage(content=user_inp)]
 
-    response = await _planner_llm.ainvoke(messages)
+    response = await _get_planner_llm().ainvoke(messages)
 
     if hasattr(response, "tool_calls") and response.tool_calls:
         tool_map = {t.name: t for t in PLANNER_TOOLS}

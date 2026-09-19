@@ -78,4 +78,30 @@ def build_graph():
     return builder.compile(checkpointer=MemorySaver())
 
 
-graph = build_graph()
+_graph_instance = None
+
+
+def _get_graph():
+    """Return the compiled graph, building it on first call."""
+    global _graph_instance
+    if _graph_instance is None:
+        _graph_instance = build_graph()
+    return _graph_instance
+
+
+class _LazyGraph:
+    """Proxy that defers graph compilation until first attribute access."""
+
+    def __getattr__(self, name):
+        return getattr(_get_graph(), name)
+
+    def __call__(self, *args, **kwargs):
+        return _get_graph()(*args, **kwargs)
+
+    def __repr__(self):
+        if _graph_instance is not None:
+            return repr(_graph_instance)
+        return "<LazyGraph: not yet compiled>"
+
+
+graph = _LazyGraph()
