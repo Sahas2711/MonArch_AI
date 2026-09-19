@@ -66,7 +66,7 @@ from RAG.manager import rag_manager
 from SQL.db import get_pg_pool, get_sqlite_connection, init_sqlite_db
 from SQL.memory_consolidator import distill_and_store_facts
 from SQL.repository import memory_repo
-from utils.config import GROQ_MODEL, LANGCHAIN_API_KEY, LANGCHAIN_PROJECT
+from utils.config import _get_active_model_name, LANGCHAIN_API_KEY, LANGCHAIN_PROJECT
 from utils.eval import run_eval
 from utils.logger import log
 from utils.rate_limiter import RateLimiterMiddleware
@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("Could not run init_sqlite_db: %s", exc)
 
-    log.info("Active LLM Model: %s", GROQ_MODEL)
+    log.info("Active LLM Model: %s", _get_active_model_name())
     if LANGCHAIN_API_KEY:
         log.info("LangSmith Observability active on project: %s", LANGCHAIN_PROJECT)
     else:
@@ -256,7 +256,7 @@ async def health_check():
     """System health check endpoint."""
     return HealthResponse(
         status="healthy",
-        model=GROQ_MODEL,
+        model=_get_active_model_name(),
         langsmith_enabled=bool(LANGCHAIN_API_KEY),
         langsmith_project=LANGCHAIN_PROJECT,
         rag_total_documents=len(rag_manager.all_documents),

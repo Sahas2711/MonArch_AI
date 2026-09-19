@@ -19,7 +19,7 @@ from MCP.server import run_mcp_server
 from RAG.manager import RAGAgentManager, rag_manager
 from SQL.repository import MemoryRepository, memory_repo
 from main import chat_loop, main
-from utils.config import EMBEDDING_MODEL, GROQ_API_KEY, GROQ_MODEL, UNSTRUCTURED_API_KEY, llm
+from utils.config import EMBEDDING_MODEL, GROQ_API_KEY, _get_active_model_name, UNSTRUCTURED_API_KEY, llm
 from utils.eval import run_eval
 from utils.logger import log
 from utils.retry import llm_retry
@@ -46,7 +46,7 @@ __all__ = [
     "llm",
     "llm_retry",
     "GROQ_API_KEY",
-    "GROQ_MODEL",
+    "_get_active_model_name",
     "EMBEDDING_MODEL",
     "UNSTRUCTURED_API_KEY",
 ]

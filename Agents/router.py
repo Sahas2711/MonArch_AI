@@ -11,7 +11,14 @@ from guardrails.input_guard import sanitize_and_validate_input
 
 from SQL.repository import memory_repo
 
-router_llm = llm.with_structured_output(RouteDecision)
+_router_llm = None
+
+
+def _get_router_llm():
+    global _router_llm
+    if _router_llm is None:
+        _router_llm = llm.with_structured_output(RouteDecision)
+    return _router_llm
 
 
 @llm_retry()
@@ -42,7 +49,7 @@ async def _route_decision(user_inp: str) -> RouteDecision:
         "(news, prices, weather, recent events).\n"
         "Otherwise pick planner for general reasoning, coding, or writing tasks."
     )
-    return await router_llm.ainvoke(
+    return await _get_router_llm().ainvoke(
         [SystemMessage(content=sys_prompt), HumanMessage(content=user_inp)]
     )
 

@@ -129,5 +129,57 @@ def _initialize_llm():
     raise RuntimeError("Neither Bedrock nor Groq API key is available for LLM initialization.")
 
 
-llm, ACTIVE_MODEL_NAME = _initialize_llm()
-GROQ_MODEL = ACTIVE_MODEL_NAME
+# ---------------------------------------------------------------------------
+# Lazy LLM singleton – initialised on first access via get_llm(), NOT at
+# import time, so that test / CI environments without API keys can still
+# import this module safely.
+# ---------------------------------------------------------------------------
+_llm_instance = None
+_active_model_name = None
+
+
+def get_llm():
+    """Return the (lazily-initialised) LLM singleton and its model name."""
+    global _llm_instance, _active_model_name
+    if _llm_instance is None:
+        _llm_instance, _active_model_name = _initialize_llm()
+    return _llm_instance, _active_model_name
+
+
+class _LazyLLM:
+    """Proxy that defers LLM construction until the object is actually used."""
+
+    def __getattr__(self, name):
+        instance, _ = get_llm()
+        return getattr(instance, name)
+
+    def __call__(self, *args, **kwargs):
+        instance, _ = get_llm()
+        return instance(*args, **kwargs)
+
+    def __repr__(self):
+        if _llm_instance is not None:
+            return repr(_llm_instance)
+        return "<LazyLLM: not yet initialised>"
+
+    def __or__(self, other):
+        instance, _ = get_llm()
+        return instance.__or__(other)
+
+    def __ror__(self, other):
+        instance, _ = get_llm()
+        return instance.__ror__(other)
+
+
+llm = _LazyLLM()
+
+
+def _get_active_model_name():
+    """Return the active model name, initialising the LLM if needed."""
+    _, name = get_llm()
+    return name
+
+
+ACTIVE_MODEL_NAME = None  # populated lazily; prefer _get_active_model_name()
+GROQ_MODEL = None  # populated lazily; prefer _get_active_model_name()
+
