@@ -88,7 +88,10 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("Could not run init_sqlite_db: %s", exc)
 
-    log.info("Active LLM Model: %s", _get_active_model_name())
+    try:
+        log.info("Active LLM Model: %s", _get_active_model_name())
+    except RuntimeError:
+        log.warning("LLM not available (no API key configured). Running in limited mode.")
     if LANGCHAIN_API_KEY:
         log.info("LangSmith Observability active on project: %s", LANGCHAIN_PROJECT)
     else:
@@ -254,9 +257,13 @@ async def global_exception_handler(request, exc: Exception):
 @app.get("/api/health", response_model=HealthResponse, tags=["Health"])
 async def health_check():
     """System health check endpoint."""
+    try:
+        model_name = _get_active_model_name()
+    except RuntimeError:
+        model_name = "unavailable"
     return HealthResponse(
         status="healthy",
-        model=_get_active_model_name(),
+        model=model_name,
         langsmith_enabled=bool(LANGCHAIN_API_KEY),
         langsmith_project=LANGCHAIN_PROJECT,
         rag_total_documents=len(rag_manager.all_documents),
